@@ -29,7 +29,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   final List<String> icons = ["🥩", "🐟", "🥦", "🍎", "🥛", "📦"];
 
   Color customColor = const Color(0xFF1B5E20); 
-  String? apiKey;
+  String? apiKey = ""; // 初期値を空文字に設定
 
   CameraController? _cameraController;
   bool _isCameraInitializing = false;
@@ -39,7 +39,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   // 入力用コントローラー
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _dateController = TextEditingController(text: "3");
-  final TextEditingController _countController = TextEditingController(text: "1"); // 個数用
+  final TextEditingController _countController = TextEditingController(text: "1");
   final TextEditingController _recipeTitleController = TextEditingController();
   final TextEditingController _recipeBodyController = TextEditingController();
   final TextEditingController _apiController = TextEditingController();
@@ -47,13 +47,13 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   late AnimationController _blinkController;
 
   final List<Map<String, dynamic>> colorList = [
-    {"group": "モノトーン", "name": "ホワイト", "color": Color(0xFFFFFFFF)},
-    {"group": "モノトーン", "name": "ブラック", "color": Color(0xFF000000)},
-    {"group": "赤・桃", "name": "ピンク", "color": Color(0xFFFFC0CB)},
-    {"group": "赤・桃", "name": "レッド", "color": Color(0xFFFF0000)},
-    {"group": "青・紺", "name": "スカイブルー", "color": Color(0xFF87CEEB)},
-    {"group": "緑", "name": "フォレストグリーン", "color": Color(0xFF228B22)},
-    {"group": "黄・橙", "name": "オレンジ", "color": Color(0xFFFFA500)},
+    {"group": "モノトーン", "name": "ホワイト", "color": const Color(0xFFFFFFFF)},
+    {"group": "モノトーン", "name": "ブラック", "color": const Color(0xFF000000)},
+    {"group": "赤・桃", "name": "ピンク", "color": const Color(0xFFFFC0CB)},
+    {"group": "赤・桃", "name": "レッド", "color": const Color(0xFFFF0000)},
+    {"group": "青・紺", "name": "スカイブルー", "color": const Color(0xFF87CEEB)},
+    {"group": "緑", "name": "フォレストグリーン", "color": const Color(0xFF228B22)},
+    {"group": "黄・橙", "name": "オレンジ", "color": const Color(0xFFFFA500)},
   ];
 
   @override
@@ -153,8 +153,10 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       recipeList = jsonDecode(prefs.getString('recipeList') ?? "[]");
       int? colorVal = prefs.getInt('savedColor');
       if (colorVal != null) customColor = Color(colorVal);
-      apiKey = prefs.getString('gemini_api_key');
-      _apiController.text = apiKey ?? "";
+      
+      // エラー対策: nullの場合は空文字をセット
+      apiKey = prefs.getString('gemini_api_key') ?? "";
+      _apiController.text = apiKey!;
     });
   }
 
@@ -164,16 +166,36 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     }
   }
 
-  // --- AI相談 ---
+  // --- AI相談 (レシピ提案だけに限定) ---
   Future<void> _askGemini() async {
-    if (apiKey == null || apiKey!.isEmpty) {
+    // APIキーがない場合は通信させない
+    if (apiKey == null || apiKey!.isEmpty || apiKey!.length < 10) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("設定からAIの準備をしてください")));
       return;
     }
+
+    // 在庫がない場合も通信させない
+    if (inventory.isEmpty) {
+      _showRecipeResult("【${charSettings[modeIndex]['name']}】\n冷蔵庫が空っぽじゃ！まずは食材を登録するのじゃ。");
+      return;
+    }
+
     setState(() => _isSuggesting = true);
-    await Future.delayed(const Duration(seconds: 2));
-    _showRecipeResult("【${charSettings[modeIndex]['name']}の提案】\n今の食材なら「秘密の野菜炒め」が良さそうじゃ！期限の近い食材から使うのがコツじゃぞ。");
-    setState(() => _isSuggesting = false);
+
+    try {
+      // 実際の通信を想定したシミュレーション
+      // 本来はここに Gemini API のリクエストを書きます
+      await Future.delayed(const Duration(seconds: 2));
+      
+      String prompt = "冷蔵庫の食材: ${inventory.map((e) => e['name']).join(', ')}。これらを使ったレシピを1つ提案してください。";
+      debugPrint("API送信プロンプト: $prompt"); // ログにだけ出す
+
+      _showRecipeResult("【${charSettings[modeIndex]['name']}の提案】\n今の食材なら「秘密の野菜炒め」が良さそうじゃ！期限の近い食材から使うのがコツじゃぞ。");
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("エラーが発生しました: $e")));
+    } finally {
+      setState(() => _isSuggesting = false);
+    }
   }
 
   void _showRecipeResult(String result) {
@@ -240,7 +262,6 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
                           children: [
                             Text(item["name"], style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
                             const SizedBox(width: 10),
-                            // ★ 個数表示を追加
                             Text("x ${item["count"] ?? 1}", style: TextStyle(color: textColor.withAlpha(180), fontSize: 14)),
                           ],
                         ),
@@ -273,7 +294,6 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       Wrap(spacing: 10, children: icons.map((icon) => GestureDetector(onTap: () => setState(() => selectedIcon = icon), child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: selectedIcon == icon ? Colors.yellowAccent : textColor.withAlpha(30), borderRadius: BorderRadius.circular(8)), child: Text(icon, style: const TextStyle(fontSize: 24))))).toList()),
       TextField(controller: _nameController, style: TextStyle(color: textColor), decoration: InputDecoration(labelText: "食材名", labelStyle: TextStyle(color: textColor.withAlpha(150)))),
       TextField(controller: _dateController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "期限（数字）", labelStyle: TextStyle(color: textColor.withAlpha(150)))),
-      // ★ 個数入力欄を追加
       TextField(controller: _countController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "個数", labelStyle: TextStyle(color: textColor.withAlpha(150)))),
       const SizedBox(height: 20),
       SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: () { if (_nameController.text.isNotEmpty) { 
@@ -327,7 +347,6 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     ])))));
   }
 
-  // ★ アイテム追加ロジック (個数対応)
   void _addItem(String name, String date, int count) { 
     String formattedDate = date;
     if (RegExp(r'^\d+$').hasMatch(date)) { formattedDate = "あと${date}日"; }
@@ -336,7 +355,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
         "name": name, 
         "icon": selectedIcon, 
         "limit": formattedDate,
-        "count": count, // 個数を追加
+        "count": count,
       }); 
     }); 
     _saveData(); 
