@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import 'dart:convert';
-import 'dart:html' as html;
+import 'dart:html' as html; // Web用の音声・通知機能
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // カメラの準備（Webブラウザで許可が必要）
   List<CameraDescription> cameras = [];
   try {
     cameras = await availableCameras();
@@ -15,19 +16,26 @@ void main() async {
   runApp(ReizokoApp(cameras: cameras));
 }
 
-class ReizokoApp extends StatelessWidget {
+class ReizokoApp extends StatefulWidget {
   final List<CameraDescription> cameras;
   const ReizokoApp({super.key, required this.cameras});
+
+  @override
+  State<ReizokoApp> createState() => _ReizokoAppState();
+}
+
+class _ReizokoAppState extends State<ReizokoApp> {
+  Color themeColor = Colors.green; 
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '冷蔵庫RPG',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange.shade900),
+        colorScheme: ColorScheme.fromSeed(seedColor: themeColor),
         useMaterial3: true,
       ),
-      home: ReizokoHomePage(cameras: cameras),
+      home: ReizokoHomePage(cameras: widget.cameras),
     );
   }
 }
@@ -40,215 +48,238 @@ class ReizokoHomePage extends StatefulWidget {
   State<ReizokoHomePage> createState() => _ReizokoHomePageState();
 }
 
-class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderStateMixin {
+class _ReizokoHomePageState extends State<ReizokoHomePage> with SingleTickerProviderStateMixin {
   List<Map<String, dynamic>> inventory = [];
   List<String> shoppingList = [];
-  List<Map<String, dynamic>> monsterBook = [];
-  String characterMode = "長老";
+  String characterMode = "長老"; 
+  String apiKey = "";
   
   final TextEditingController _itemController = TextEditingController();
   final TextEditingController _countController = TextEditingController(text: "1");
+  DateTime _selectedDate = DateTime.now().add(const Duration(days: 3));
   String _selectedIcon = "🍎";
-  String _selectedUnit = "個";
-  final List<String> _unitOptions = ["個", "kg", "g", "本", "ml", "L", "パック", "袋", "玉"];
+
+  late AnimationController _blinkController;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _itemController.addListener(_autoDetectItems);
+    _blinkController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+    
+    // 起動時に通知の許可を求める
+    _requestNotificationPermission();
   }
 
   @override
   void dispose() {
-    _itemController.removeListener(_autoDetectItems);
-    _itemController.dispose();
-    _countController.dispose();
+    _blinkController.dispose();
     super.dispose();
   }
 
-  // 自動判別アシスト
-  void _autoDetectItems() {
-    String text = _itemController.text;
-    if (text.contains("米") || text.contains("こめ") || text.contains("コメ")) {
-      if (_selectedUnit != "kg") {
-        setState(() { _selectedUnit = "kg"; _selectedIcon = "🍚"; _countController.text = "5"; });
-      }
-    } else if (text.contains("牛乳") || text.contains("ミルク") || text.contains("酒")) {
-      if (_selectedUnit != "ml") {
-        setState(() { _selectedUnit = "ml"; _selectedIcon = "🥛"; _countController.text = "1000"; });
-      }
+  // --- 通知機能 ---
+  void _requestNotificationPermission() {
+    if (html.Notification.permission == 'default') {
+      html.Notification.requestPermission();
     }
   }
 
+  void _showNotification(String title, String body) {
+    if (html.Notification.permission == 'granted') {
+      html.Notification(title, body: body);
+    }
+  }
+
+  // --- データの読み込み・保存 ---
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       inventory = List<Map<String, dynamic>>.from(json.decode(prefs.getString('inventory') ?? '[]'));
       shoppingList = prefs.getStringList('shoppingList') ?? [];
-      monsterBook = List<Map<String, dynamic>>.from(json.decode(prefs.getString('monsterBook') ?? '[]'));
+      characterMode = prefs.getString('characterMode') ?? "長老";
+      apiKey = prefs.getString('apiKey') ?? "";
     });
+    _checkExpiryAlert();
   }
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('inventory', json.encode(inventory));
     await prefs.setStringList('shoppingList', shoppingList);
-    await prefs.setString('monsterBook', json.encode(monsterBook));
+    await prefs.setString('characterMode', characterMode);
+    await prefs.setString('apiKey', apiKey);
   }
 
+  // --- 音声とアラート ---
+  void _speak(String text) {
+    final utterance = html.SpeechSynthesisUtterance(text)..lang = 'ja-JP';
+    html.window.speechSynthesis?.speak(utterance);
+  }
+
+  void _checkExpiryAlert() {
+    List<String> urgentItems = [];
+    for (var item in inventory) {
+      final expiry = DateTime.parse(item['expiry']);
+      if (expiry.difference(DateTime.now()).inDays <= 1) {
+        urgentItems.add(item['name']);
+      }
+    }
+
+    if (urgentItems.isNotEmpty) {
+      String msg = characterMode == "長老" ? "警告じゃ！${urgentItems.join(', ')}が腐りそうじゃぞ！" : "期限間近の食材があります。";
+      // 音声
+      Future.delayed(const Duration(seconds: 2), () => _speak(msg));
+      // ブラウザ通知
+      _showNotification("【冷蔵庫RPG 警告】", "${urgentItems.length}個の食材が期限間近です！");
+    }
+  }
+
+  // --- 操作ロジック ---
   void _addItem() {
     if (_itemController.text.isEmpty) return;
     setState(() {
       inventory.add({
         "name": _itemController.text,
         "icon": _selectedIcon,
-        "count": double.tryParse(_countController.text) ?? 1.0,
-        "unit": _selectedUnit,
+        "count": int.tryParse(_countController.text) ?? 1,
+        "expiry": _selectedDate.toIso8601String(),
       });
-      if (!monsterBook.any((m) => m['name'] == _itemController.text)) {
-        monsterBook.add({"name": _itemController.text, "icon": _selectedIcon});
-      }
       _itemController.clear();
       _countController.text = "1";
-      _selectedUnit = "個";
     });
     _saveData();
+    _speak(characterMode == "長老" ? "新しい獲物じゃ！" : "追加しました。");
   }
 
-  void _updateCount(int index, double delta) {
+  void _consumeItem(int index) {
     setState(() {
-      inventory[index]['count'] += delta;
-      if (inventory[index]['count'] <= 0.001) {
-        if (!shoppingList.contains(inventory[index]['name'])) shoppingList.add(inventory[index]['name']);
+      String name = inventory[index]['name'];
+      if (inventory[index]['count'] > 1) {
+        inventory[index]['count'] -= 1;
+      } else {
+        shoppingList.add(name);
         inventory.removeAt(index);
       }
     });
     _saveData();
+    _speak(characterMode == "長老" ? "見事な討伐じゃ！" : "消費しました。");
   }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text("冷蔵庫RPG - $characterMode"),
-          bottom: const TabBar(
-            tabs: [Tab(text: "冒険(在庫)"), Tab(text: "図鑑"), Tab(text: "買出リスト")],
-          ),
-        ),
-        body: TabBarView(
-          children: [ _buildInventoryPage(), _buildBookPage(), _buildShoppingPage() ],
-        ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("冷蔵庫RPG ($characterMode)"),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          IconButton(icon: const Icon(Icons.settings), onPressed: _showSettings),
+        ],
+      ),
+      body: Column(
+        children: [
+          _buildInputArea(),
+          const Divider(),
+          Expanded(child: _buildInventoryList()),
+        ],
       ),
     );
   }
 
-  Widget _buildInventoryPage() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
+  Widget _buildInputArea() {
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        children: [
+          Row(
             children: [
-              // 1段目: アイコン選択と名前入力
-              Row(
-                children: [
-                  DropdownButton<String>(
-                    value: _selectedIcon,
-                    items: ["🍎", "🥩", "🥦", "🥛", "🐟", "🍚", "🥚"].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 24)))).toList(),
-                    onChanged: (v) => setState(() => _selectedIcon = v!),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: TextField(controller: _itemController, decoration: const InputDecoration(labelText: "食材名を入力", border: OutlineInputBorder()))),
-                ],
+              DropdownButton<String>(
+                value: _selectedIcon,
+                items: ["🍎", "🥩", "🥦", "🥛", "🐟"].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 24)))).toList(),
+                onChanged: (v) => setState(() => _selectedIcon = v!),
               ),
-              const SizedBox(height: 10),
-              // 2段目: 数量と単位選択
-              Row(
-                children: [
-                  SizedBox(width: 80, child: TextField(controller: _countController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "数", border: OutlineInputBorder()))),
-                  const SizedBox(width: 10),
-                  DropdownButton<String>(
-                    value: _selectedUnit,
-                    items: _unitOptions.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
-                    onChanged: (v) => setState(() => _selectedUnit = v!),
-                  ),
-                  const Spacer(),
-                  ElevatedButton.icon(
-                    onPressed: _addItem,
-                    icon: const Icon(Icons.add),
-                    label: const Text("保管"),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade100),
-                  ),
-                ],
-              ),
+              const SizedBox(width: 8),
+              Expanded(child: TextField(controller: _itemController, decoration: const InputDecoration(labelText: "食材名", border: OutlineInputBorder()))),
+              const SizedBox(width: 8),
+              SizedBox(width: 60, child: TextField(controller: _countController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "数", border: OutlineInputBorder()))),
+              IconButton(icon: const Icon(Icons.add_box, color: Colors.green, size: 40), onPressed: _addItem),
             ],
           ),
-        ),
-        const Divider(),
-        Expanded(
-          child: ListView.builder(
-            itemCount: inventory.length,
-            itemBuilder: (context, index) {
-              final item = inventory[index];
-              final bool isKg = item['unit'] == "kg";
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: ListTile(
-                  leading: Text(item['icon'], style: const TextStyle(fontSize: 30)),
-                  title: Text(item['name']),
-                  subtitle: Text("${item['count'].toStringAsFixed(isKg ? 2 : 0)} ${item['unit']}"),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isKg) ...[
-                        ElevatedButton(onPressed: () => _updateCount(index, -0.15), child: const Text("1合")),
-                        const SizedBox(width: 4),
-                        ElevatedButton(onPressed: () => _updateCount(index, -0.30), child: const Text("2合")),
-                      ] else ...[
-                        IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.orange), onPressed: () => _updateCount(index, -1)),
-                        IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.blue), onPressed: () => _updateCount(index, 1)),
-                      ],
-                    ],
-                  ),
-                ),
-              );
+          TextButton.icon(
+            icon: const Icon(Icons.calendar_month),
+            onPressed: () async {
+              final date = await showDatePicker(context: context, initialDate: _selectedDate, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)));
+              if (date != null) setState(() => _selectedDate = date);
             },
+            label: Text("賞味期限: ${_selectedDate.year}/${_selectedDate.month}/${_selectedDate.day}"),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildBookPage() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(10),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3),
-      itemCount: monsterBook.length,
-      itemBuilder: (context, index) {
-        final monster = monsterBook[index];
-        bool inStock = inventory.any((i) => i['name'] == monster['name']);
-        return Card(
-          color: inStock ? Colors.orange.shade50 : Colors.grey.shade200,
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(monster['icon'], style: const TextStyle(fontSize: 30)), Text(monster['name'])]),
-        );
-      },
-    );
-  }
-
-  Widget _buildShoppingPage() {
+  Widget _buildInventoryList() {
     return ListView.builder(
-      itemCount: shoppingList.length,
+      itemCount: inventory.length,
       itemBuilder: (context, index) {
-        return ListTile(
-          leading: const Icon(Icons.shopping_cart, color: Colors.orange),
-          title: Text(shoppingList[index]),
-          trailing: const Text("要討伐(未購入)", style: TextStyle(color: Colors.red, fontSize: 12)),
-          onTap: () => setState(() => shoppingList.removeAt(index)),
+        final item = inventory[index];
+        final expiry = DateTime.parse(item['expiry']);
+        final isUrgent = expiry.difference(DateTime.now()).inDays <= 1;
+
+        return AnimatedBuilder(
+          animation: _blinkController,
+          builder: (context, child) {
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              color: isUrgent ? Colors.red.withOpacity(0.1 + 0.3 * _blinkController.value) : Colors.white,
+              shape: isUrgent ? RoundedRectangleBorder(side: const BorderSide(color: Colors.red, width: 2), borderRadius: BorderRadius.circular(8)) : null,
+              child: ListTile(
+                leading: Text(item['icon'], style: const TextStyle(fontSize: 30)),
+                title: Text(item['name'], style: TextStyle(fontWeight: isUrgent ? FontWeight.bold : FontWeight.normal, color: isUrgent ? Colors.red.shade900 : Colors.black)),
+                subtitle: Text("期限: ${expiry.month}/${expiry.day} | 残り: ${item['count']}個"),
+                trailing: IconButton(
+                  icon: const Icon(Icons.restaurant, color: Colors.orange, size: 30),
+                  onPressed: () => _consumeItem(index),
+                ),
+              ),
+            );
+          },
         );
       },
+    );
+  }
+
+  void _showSettings() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("冒険の設定"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("キャラクター選択"),
+            DropdownButton<String>(
+              value: characterMode,
+              isExpanded: true,
+              items: ["長老", "ドクター", "トレーダー"].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+              onChanged: (v) {
+                setState(() => characterMode = v!);
+                _saveData();
+                Navigator.pop(context);
+              },
+            ),
+            const SizedBox(height: 20),
+            const Text("AI APIキー"),
+            TextField(
+              controller: TextEditingController(text: apiKey),
+              onChanged: (v) => apiKey = v,
+              decoration: const InputDecoration(hintText: "Gemini Keyを入力"),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
