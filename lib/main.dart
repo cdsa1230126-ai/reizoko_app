@@ -25,8 +25,9 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   List<dynamic> inventory = [];
   List<dynamic> shoppingList = [];
   List<dynamic> recipeList = [];
+  List<dynamic> monsterBook = []; // 図鑑データを追加
   String selectedIcon = "🥩";
-  final List<String> icons = ["🥩", "🐟", "🥦", "🍎", "🥛", "📦"];
+  final List<String> icons = ["🥩", "🐟", "🥦", "🍎", "🥛", "🍚", "📦"];
 
   Color customColor = const Color(0xFF1B5E20); 
   String? apiKey;
@@ -36,24 +37,24 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   bool _isSuggesting = false;
   String? _capturedImagePath;
 
-  // 入力用コントローラー
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _dateController = TextEditingController(text: "3");
-  final TextEditingController _countController = TextEditingController(text: "1"); // 個数用
+  final TextEditingController _countController = TextEditingController(text: "1");
   final TextEditingController _recipeTitleController = TextEditingController();
   final TextEditingController _recipeBodyController = TextEditingController();
   final TextEditingController _apiController = TextEditingController();
 
+  // 単位の追加
+  String _selectedUnit = "個";
+  final List<String> _unitOptions = ["個", "kg", "g", "本", "ml", "L", "パック", "袋"];
+
   late AnimationController _blinkController;
 
   final List<Map<String, dynamic>> colorList = [
-    {"group": "モノトーン", "name": "ホワイト", "color": Color(0xFFFFFFFF)},
-    {"group": "モノトーン", "name": "ブラック", "color": Color(0xFF000000)},
-    {"group": "赤・桃", "name": "ピンク", "color": Color(0xFFFFC0CB)},
-    {"group": "赤・桃", "name": "レッド", "color": Color(0xFFFF0000)},
-    {"group": "青・紺", "name": "スカイブルー", "color": Color(0xFF87CEEB)},
-    {"group": "緑", "name": "フォレストグリーン", "color": Color(0xFF228B22)},
-    {"group": "黄・橙", "name": "オレンジ", "color": Color(0xFFFFA500)},
+    {"group": "緑", "name": "フォレストグリーン", "color": const Color(0xFF1B5E20)},
+    {"group": "モノトーン", "name": "ブラック", "color": const Color(0xFF000000)},
+    {"group": "赤", "name": "レッド", "color": const Color(0xFF8B0000)},
+    {"group": "青", "name": "ネイビー", "color": const Color(0xFF000080)},
   ];
 
   @override
@@ -61,6 +62,24 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     super.initState();
     _blinkController = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..repeat(reverse: true);
     _loadData().then((_) => _checkUrgentItems());
+    
+    // お米検知のリスナー
+    _nameController.addListener(_autoDetectRice);
+  }
+
+  // お米自動検知ロジック
+  void _autoDetectRice() {
+    String text = _nameController.text;
+    if (text.contains("米") || text.contains("こめ") || text.contains("コメ")) {
+      if (_selectedUnit != "kg") {
+        setState(() {
+          _selectedUnit = "kg";
+          selectedIcon = "🍚";
+          _countController.text = "5";
+          _dateController.text = "365";
+        });
+      }
+    }
   }
 
   Color _getTextColor(Color background) {
@@ -110,6 +129,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _nameController.removeListener(_autoDetectRice);
     _cameraController?.dispose(); _nameController.dispose(); _dateController.dispose(); 
     _countController.dispose(); _recipeTitleController.dispose(); _recipeBodyController.dispose(); 
     _apiController.dispose(); _blinkController.dispose();
@@ -140,6 +160,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     await prefs.setString('inventory', jsonEncode(inventory));
     await prefs.setString('shoppingList', jsonEncode(shoppingList));
     await prefs.setString('recipeList', jsonEncode(recipeList));
+    await prefs.setString('monsterBook', jsonEncode(monsterBook)); // 図鑑保存
     await prefs.setInt('savedColor', customColor.value);
     await prefs.setString('gemini_api_key', apiKey ?? "");
   }
@@ -151,6 +172,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       inventory = jsonDecode(prefs.getString('inventory') ?? "[]");
       shoppingList = jsonDecode(prefs.getString('shoppingList') ?? "[]");
       recipeList = jsonDecode(prefs.getString('recipeList') ?? "[]");
+      monsterBook = jsonDecode(prefs.getString('monsterBook') ?? "[]"); // 図鑑読込
       int? colorVal = prefs.getInt('savedColor');
       if (colorVal != null) customColor = Color(colorVal);
       apiKey = prefs.getString('gemini_api_key');
@@ -172,7 +194,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     }
     setState(() => _isSuggesting = true);
     await Future.delayed(const Duration(seconds: 2));
-    _showRecipeResult("【${charSettings[modeIndex]['name']}の提案】\n今の食材なら「秘密の野菜炒め」が良さそうじゃ！期限の近い食材から使うのがコツじゃぞ。");
+    _showRecipeResult("【${charSettings[modeIndex]['name']}の提案】\n今の食材なら「魔物の肉じゃが」が良さそうじゃ！${inventory.isNotEmpty ? inventory[0]['name'] : '食材'}をメインにするのじゃ。");
     setState(() => _isSuggesting = false);
   }
 
@@ -182,34 +204,6 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       content: Text(result),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("了解！"))],
     ));
-  }
-
-  // --- APIガイド ---
-  void _showApiGuide() {
-    int step = 1;
-    showDialog(context: context, builder: (context) => StatefulBuilder(builder: (context, setDialogState) {
-      return AlertDialog(
-        title: Text("AIシェフ準備 ($step/3)"),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (step == 1) ...[
-            const Text("まずはGoogleのサイトで、AIを使うための『合言葉』を発行します。"),
-            const SizedBox(height: 15),
-            ElevatedButton(onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']), child: const Text("サイトを開く")),
-          ] else if (step == 2) ...[
-            const Text("サイトの中にある青いボタン『Create API key』を押して、出てきた英数字をコピーしてください。"),
-            const Icon(Icons.content_copy, size: 50, color: Colors.blue),
-          ] else ...[
-            const Text("最後に、下の欄にコピーした合言葉を貼り付けて完了です！"),
-            TextField(controller: _apiController, decoration: const InputDecoration(hintText: "AIza..."), onChanged: (v) => apiKey = v),
-          ]
-        ]),
-        actions: [
-          if (step > 1) TextButton(onPressed: () => setDialogState(() => step--), child: const Text("戻る")),
-          if (step < 3) ElevatedButton(onPressed: () => setDialogState(() => step++), child: const Text("次へ"))
-          else ElevatedButton(onPressed: () { _saveData(); Navigator.pop(context); }, child: const Text("完了！")),
-        ],
-      );
-    }));
   }
 
   // --- UIビルド: 冷蔵庫リスト ---
@@ -226,9 +220,19 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
               itemBuilder: (context, index) {
                 final item = inventory[index];
                 bool isUrgent = item["limit"].toString().contains("今日") || item["limit"].toString().contains("あと1日");
+                String unit = item["unit"] ?? "個";
                 return Dismissible(
                   key: UniqueKey(),
-                  onDismissed: (dir) { setState(() { shoppingList.add(item); inventory.removeAt(index); }); _speak("${item["name"]}${char["gain"]}"); _saveData(); },
+                  onDismissed: (dir) { 
+                    setState(() { 
+                      if(!shoppingList.any((s) => s["name"] == item["name"])) {
+                        shoppingList.add(item); 
+                      }
+                      inventory.removeAt(index); 
+                    }); 
+                    _speak("${item["name"]}${char["gain"]}"); 
+                    _saveData(); 
+                  },
                   child: AnimatedBuilder(
                     animation: _blinkController,
                     builder: (context, child) => Card(
@@ -240,8 +244,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
                           children: [
                             Text(item["name"], style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
                             const SizedBox(width: 10),
-                            // ★ 個数表示を追加
-                            Text("x ${item["count"] ?? 1}", style: TextStyle(color: textColor.withAlpha(180), fontSize: 14)),
+                            Text("${item["count"] ?? 1} $unit", style: TextStyle(color: textColor.withAlpha(180), fontSize: 14)),
                           ],
                         ),
                         trailing: Text(item["limit"], style: TextStyle(color: isUrgent ? Colors.white : Colors.redAccent, fontWeight: FontWeight.bold)),
@@ -272,12 +275,24 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       const SizedBox(height: 20),
       Wrap(spacing: 10, children: icons.map((icon) => GestureDetector(onTap: () => setState(() => selectedIcon = icon), child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: selectedIcon == icon ? Colors.yellowAccent : textColor.withAlpha(30), borderRadius: BorderRadius.circular(8)), child: Text(icon, style: const TextStyle(fontSize: 24))))).toList()),
       TextField(controller: _nameController, style: TextStyle(color: textColor), decoration: InputDecoration(labelText: "食材名", labelStyle: TextStyle(color: textColor.withAlpha(150)))),
-      TextField(controller: _dateController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "期限（数字）", labelStyle: TextStyle(color: textColor.withAlpha(150)))),
-      // ★ 個数入力欄を追加
-      TextField(controller: _countController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "個数", labelStyle: TextStyle(color: textColor.withAlpha(150)))),
+      
+      Row(children: [
+        Expanded(child: TextField(controller: _countController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "数", labelStyle: TextStyle(color: textColor.withAlpha(150))))),
+        const SizedBox(width: 10),
+        DropdownButton<String>(
+          value: _selectedUnit,
+          dropdownColor: Colors.black87,
+          style: TextStyle(color: textColor),
+          items: _unitOptions.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
+          onChanged: (v) => setState(() => _selectedUnit = v!),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: TextField(controller: _dateController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "期限(日)", labelStyle: TextStyle(color: textColor.withAlpha(150))))),
+      ]),
+
       const SizedBox(height: 20),
       SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: () { if (_nameController.text.isNotEmpty) { 
-        _addItem(_nameController.text, _dateController.text, int.tryParse(_countController.text) ?? 1); 
+        _addItem(_nameController.text, _dateController.text, double.tryParse(_countController.text) ?? 1.0); 
         _nameController.clear(); 
         _countController.text = "1";
         _capturedImagePath = null; 
@@ -286,7 +301,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     ]));
   }
 
-  // --- UIビルド: レシピ画面 ---
+  // --- UIビルド: レシピ & 図鑑 画面 ---
   Widget _buildRecipeView(Color textColor) {
     return Column(children: [
       Container(padding: const EdgeInsets.all(15), width: double.infinity, color: textColor.withAlpha(20), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -297,7 +312,39 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
           ElevatedButton.icon(onPressed: _showAddRecipeDialog, icon: const Icon(Icons.add, size: 18), label: const Text("登録"), style: ElevatedButton.styleFrom(backgroundColor: Colors.yellowAccent, foregroundColor: Colors.black)),
         ])
       ])),
-      Expanded(child: recipeList.isEmpty ? Center(child: Text("レシピはまだありません", style: TextStyle(color: textColor.withAlpha(120)))) : ListView.builder(itemCount: recipeList.length, itemBuilder: (context, index) { final recipe = recipeList[index]; return Card(color: textColor.withAlpha(30), elevation: 0, margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), child: ExpansionTile(title: Text(recipe["title"], style: TextStyle(color: textColor, fontWeight: FontWeight.bold)), children: [Padding(padding: const EdgeInsets.all(15), child: Align(alignment: Alignment.centerLeft, child: Text(recipe["body"], style: TextStyle(color: textColor)))), TextButton(onPressed: () { setState(() { recipeList.removeAt(index); }); _saveData(); }, child: const Text("削除", style: TextStyle(color: Colors.redAccent)))])); }))
+      Expanded(
+        child: ListView(
+          children: [
+            ...recipeList.asMap().entries.map((entry) { 
+              int index = entry.key;
+              var recipe = entry.value;
+              return Card(color: textColor.withAlpha(30), elevation: 0, margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), child: ExpansionTile(title: Text(recipe["title"], style: TextStyle(color: textColor, fontWeight: FontWeight.bold)), children: [Padding(padding: const EdgeInsets.all(15), child: Align(alignment: Alignment.centerLeft, child: Text(recipe["body"], style: TextStyle(color: textColor)))), TextButton(onPressed: () { setState(() { recipeList.removeAt(index); }); _saveData(); }, child: const Text("削除", style: TextStyle(color: Colors.redAccent)))])); 
+            }),
+            const Divider(color: Colors.white24),
+            Padding(
+              padding: const EdgeInsets.all(15.0),
+              child: Text("👾 討伐図鑑", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+            ),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 4),
+              itemCount: monsterBook.length,
+              itemBuilder: (context, i) => Card(
+                color: textColor.withAlpha(20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(monsterBook[i]["icon"], style: const TextStyle(fontSize: 20)),
+                    Text(monsterBook[i]["name"], style: TextStyle(color: textColor, fontSize: 10), overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      )
     ]);
   }
 
@@ -308,27 +355,24 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       backgroundColor: customColor,
       appBar: AppBar(title: Text(charSettings[modeIndex]["name"], style: TextStyle(color: textColor)), backgroundColor: Colors.transparent, elevation: 0, iconTheme: IconThemeData(color: textColor), actions: [IconButton(onPressed: _showShoppingList, icon: const Icon(Icons.shopping_cart)), IconButton(onPressed: _showSettings, icon: const Icon(Icons.settings))]),
       body: IndexedStack(index: _currentTabIndex, children: [_buildInventoryView(textColor), _buildAddView(textColor), _buildRecipeView(textColor)]),
-      bottomNavigationBar: BottomNavigationBar(currentIndex: _currentTabIndex, onTap: (i) { if (i != 1) _stopCamera(); setState(() => _currentTabIndex = i); }, backgroundColor: Colors.black.withAlpha(200), selectedItemColor: Colors.yellowAccent, unselectedItemColor: Colors.white54, items: const [BottomNavigationBarItem(icon: Icon(Icons.kitchen), label: "冷蔵庫"), BottomNavigationBarItem(icon: Icon(Icons.camera_alt), label: "登録"), BottomNavigationBarItem(icon: Icon(Icons.menu_book), label: "レシピ")]),
+      bottomNavigationBar: BottomNavigationBar(currentIndex: _currentTabIndex, onTap: (i) { if (i != 1) _stopCamera(); setState(() => _currentTabIndex = i); }, backgroundColor: Colors.black.withAlpha(200), selectedItemColor: Colors.yellowAccent, unselectedItemColor: Colors.white54, items: const [BottomNavigationBarItem(icon: Icon(Icons.kitchen), label: "冷蔵庫"), BottomNavigationBarItem(icon: Icon(Icons.camera_alt), label: "登録"), BottomNavigationBarItem(icon: Icon(Icons.menu_book), label: "レシピ/図鑑")]),
     );
   }
 
   void _showSettings() {
     showDialog(context: context, builder: (context) => AlertDialog(title: const Text("設定・デザイン"), content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
       const Text("✨ AIシェフの準備", style: TextStyle(fontWeight: FontWeight.bold)),
-      const SizedBox(height: 5),
-      ElevatedButton(onPressed: _showApiGuide, child: const Text("準備ガイド（30秒）を開く")),
+      ElevatedButton(onPressed: _showApiGuide, child: const Text("準備ガイドを開く")),
       const Divider(),
       const Text("モード切替", style: TextStyle(fontWeight: FontWeight.bold)),
       ...List.generate(3, (i) => RadioListTile(value: i, groupValue: modeIndex, title: Text(charSettings[i]["name"]), onChanged: (v) { setState(() => modeIndex = v!); _saveData(); Navigator.pop(context); })),
       const Divider(),
       const Text("カラー選択", style: TextStyle(fontWeight: FontWeight.bold)),
-      const SizedBox(height: 10),
-      SizedBox(height: 200, child: ListView.builder(itemCount: colorList.length, itemBuilder: (context, index) { final c = colorList[index]; return ListTile(leading: CircleAvatar(backgroundColor: c["color"], radius: 15), title: Text(c["name"]), onTap: () { setState(() => customColor = c["color"]); _saveData(); Navigator.pop(context); }); }))
+      SizedBox(height: 150, child: ListView.builder(itemCount: colorList.length, itemBuilder: (context, index) { final c = colorList[index]; return ListTile(leading: CircleAvatar(backgroundColor: c["color"], radius: 15), title: Text(c["name"]), onTap: () { setState(() => customColor = c["color"]); _saveData(); Navigator.pop(context); }); }))
     ])))));
   }
 
-  // ★ アイテム追加ロジック (個数対応)
-  void _addItem(String name, String date, int count) { 
+  void _addItem(String name, String date, double count) { 
     String formattedDate = date;
     if (RegExp(r'^\d+$').hasMatch(date)) { formattedDate = "あと${date}日"; }
     setState(() { 
@@ -336,8 +380,13 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
         "name": name, 
         "icon": selectedIcon, 
         "limit": formattedDate,
-        "count": count, // 個数を追加
+        "count": count,
+        "unit": _selectedUnit,
       }); 
+      // 図鑑への自動登録
+      if (!monsterBook.any((m) => m["name"] == name)) {
+        monsterBook.add({"name": name, "icon": selectedIcon});
+      }
     }); 
     _saveData(); 
   }
@@ -347,6 +396,32 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   }
 
   void _showShoppingList() {
-    showDialog(context: context, builder: (context) => AlertDialog(title: const Text("🛒 お買い物メモ"), content: SizedBox(width: double.maxFinite, child: shoppingList.isEmpty ? const Text("空です") : ListView.builder(shrinkWrap: true, itemCount: shoppingList.length, itemBuilder: (context, i) => ListTile(leading: Text(shoppingList[i]["icon"] ?? "📦"), title: Text(shoppingList[i]["name"])))), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("閉じる"))]));
+    showDialog(context: context, builder: (context) => AlertDialog(title: const Text("🛒 お買い物メモ"), content: SizedBox(width: double.maxFinite, child: shoppingList.isEmpty ? const Text("空です") : ListView.builder(shrinkWrap: true, itemCount: shoppingList.length, itemBuilder: (context, i) => ListTile(leading: Text(shoppingList[i]["icon"] ?? "📦"), title: Text(shoppingList[i]["name"]), trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() { shoppingList.removeAt(i); }); _saveData(); Navigator.pop(context); } )))), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("閉じる"))]));
+  }
+
+  void _showApiGuide() {
+    int step = 1;
+    showDialog(context: context, builder: (context) => StatefulBuilder(builder: (context, setDialogState) {
+      return AlertDialog(
+        title: Text("AIシェフ準備 ($step/3)"),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (step == 1) ...[
+            const Text("GoogleのサイトでAPIキーを発行します。"),
+            ElevatedButton(onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']), child: const Text("サイトを開く")),
+          ] else if (step == 2) ...[
+            const Text("『Create API key』を押し、キーをコピーします。"),
+            const Icon(Icons.content_copy, size: 50, color: Colors.blue),
+          ] else ...[
+            const Text("キーを貼り付けてください。"),
+            TextField(controller: _apiController, decoration: const InputDecoration(hintText: "AIza..."), onChanged: (v) => apiKey = v),
+          ]
+        ]),
+        actions: [
+          if (step > 1) TextButton(onPressed: () => setDialogState(() => step--), child: const Text("戻る")),
+          if (step < 3) ElevatedButton(onPressed: () => setDialogState(() => step++), child: const Text("次へ"))
+          else ElevatedButton(onPressed: () { _saveData(); Navigator.pop(context); }, child: const Text("完了！")),
+        ],
+      );
+    }));
   }
 }
