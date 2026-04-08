@@ -31,7 +31,7 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   final TextEditingController _dateController = TextEditingController(text: "3");
   final TextEditingController _countController = TextEditingController(text: "1");
   String _selectedUnit = "個";
-  final List<String> _unitOptions = ["個", "kg", "g", "本", "ml", "L", "パック", "袋"];
+  final List<String> _unitOptions = ["個", "kg", "g", "本", "ml", "L", "パック", "袋", "匹",];
 
   late AnimationController _blinkController;
 
