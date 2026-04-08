@@ -24,7 +24,7 @@ class ReizokoApp extends StatelessWidget {
     return MaterialApp(
       title: '冷蔵庫RPG',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange.shade900),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange.shade800),
         useMaterial3: true,
       ),
       home: ReizokoHomePage(cameras: cameras),
@@ -63,34 +63,34 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
       duration: const Duration(milliseconds: 700),
     )..repeat(reverse: true);
 
-    // 食材名の入力を監視して、自動で単位を変える設定
-    _itemController.addListener(_autoDetectRice);
+    // 【重要】入力欄の文字が変わるたびにチェックする設定
+    _itemController.addListener(_onItemNameChanged);
   }
 
   @override
   void dispose() {
-    _itemController.removeListener(_autoDetectRice);
+    _itemController.removeListener(_onItemNameChanged);
     _itemController.dispose();
     _countController.dispose();
     _blinkController.dispose();
     super.dispose();
   }
 
-  // 「米」という文字が入ったら自動で kg と 5 に設定する
-  void _autoDetectRice() {
+  // 入力された名前を見て「kg」にするかどうか判断する
+  void _onItemNameChanged() {
     String text = _itemController.text;
+    // 「米」が含まれているかチェック
     if (text.contains("米") || text.contains("こめ") || text.contains("コメ")) {
       if (_selectedUnit != "kg") {
         setState(() {
-          _selectedUnit = "kg";
-          _selectedIcon = "🍚";
-          _countController.text = "5"; // お米ならとりあえず5kgを提案
+          _selectedUnit = "kg";      // 単位をkgに
+          _selectedIcon = "🍚";      // アイコンをお米に
+          _countController.text = "5"; // とりあえず5kgにセット
         });
       }
     }
   }
 
-  // --- データの保存・読込 ---
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -114,7 +114,6 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
     html.window.speechSynthesis?.speak(utterance);
   }
 
-  // --- 食材追加 ---
   void _addItem() {
     if (_itemController.text.isEmpty) return;
     setState(() {
@@ -130,21 +129,20 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
       }
       _itemController.clear();
       _countController.text = "1";
-      _selectedUnit = "個"; // 追加後はリセット
+      _selectedUnit = "個"; 
     });
     _saveData();
-    _speak("新しい魔物を保管したぞ。");
+    _speak("保管完了じゃ。");
   }
 
-  // --- 消費ロジック ---
   void _consumeRice(int index, double goCount) {
     setState(() {
-      double weight = goCount * 0.15; // 1合 = 0.15kg
+      double weight = goCount * 0.15; // 1合=0.15kg
       inventory[index]['count'] -= weight;
       if (inventory[index]['count'] <= 0) {
-        if (!shoppingList.contains(inventory[index]['name'])) shoppingList.add(inventory[index]['name']);
+        shoppingList.add(inventory[index]['name']);
         inventory.removeAt(index);
-        _speak("米が尽きた！買出リストに書いたぞ。");
+        _speak("米が尽きたぞ！");
       }
     });
     _saveData();
@@ -154,7 +152,7 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
     setState(() {
       inventory[index]['count'] += delta;
       if (inventory[index]['count'] <= 0) {
-        if (!shoppingList.contains(inventory[index]['name'])) shoppingList.add(inventory[index]['name']);
+        shoppingList.add(inventory[index]['name']);
         inventory.removeAt(index);
       }
     });
@@ -169,7 +167,7 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
         appBar: AppBar(
           title: Text("冷蔵庫RPG - $characterMode"),
           bottom: const TabBar(
-            tabs: [Tab(icon: Icon(Icons.inventory), text: "在庫"), Tab(icon: Icon(Icons.menu_book), text: "図鑑"), Tab(icon: Icon(Icons.shopping_cart), text: "買出")],
+            tabs: [Tab(text: "在庫"), Tab(text: "図鑑"), Tab(text: "買出")],
           ),
         ),
         body: TabBarView(
@@ -183,27 +181,27 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Column(
+          padding: const EdgeInsets.all(12.0),
+          child: Row(
             children: [
-              Row(
-                children: [
-                  DropdownButton<String>(
-                    value: _selectedIcon,
-                    items: ["🍎", "🥩", "🥦", "🥛", "🐟", "🍚"].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 24)))).toList(),
-                    onChanged: (v) => setState(() => _selectedIcon = v!),
-                  ),
-                  Expanded(child: TextField(controller: _itemController, decoration: const InputDecoration(labelText: "食材名を入力（『米』で自動切替）"))),
-                  const SizedBox(width: 8),
-                  SizedBox(width: 45, child: TextField(controller: _countController, keyboardType: TextInputType.number)),
-                  DropdownButton<String>(
-                    value: _selectedUnit,
-                    items: ["個", "kg", "g", "本"].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                    onChanged: (v) => setState(() => _selectedUnit = v!),
-                  ),
-                  IconButton(icon: const Icon(Icons.add_circle, color: Colors.green, size: 35), onPressed: _addItem),
-                ],
+              Text(_selectedIcon, style: const TextStyle(fontSize: 24)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _itemController,
+                  decoration: const InputDecoration(labelText: "食材名（米と入れるとkgになります）"),
+                ),
               ),
+              const SizedBox(width: 8),
+              SizedBox(width: 50, child: TextField(controller: _countController, keyboardType: TextInputType.number)),
+              const SizedBox(width: 8),
+              // 現在の単位を表示
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(4)),
+                child: Text(_selectedUnit),
+              ),
+              IconButton(icon: const Icon(Icons.add_box, color: Colors.green, size: 35), onPressed: _addItem),
             ],
           ),
         ),
@@ -241,13 +239,6 @@ class _ReizokoHomePageState extends State<ReizokoHomePage> with TickerProviderSt
     );
   }
 
-  Widget _buildBookPage() { return GridView.builder(gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3), itemCount: monsterBook.length, itemBuilder: (context, index) {
-    final monster = monsterBook[index];
-    bool inStock = inventory.any((i) => i['name'] == monster['name']);
-    return Card(color: inStock ? Colors.orange.shade50 : Colors.grey.shade200, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(monster['icon'], style: const TextStyle(fontSize: 30)), Text(monster['name'])]));
-  }); }
-
-  Widget _buildShoppingPage() { return ListView.builder(itemCount: shoppingList.length, itemBuilder: (context, index) {
-    return ListTile(leading: const Icon(Icons.shopping_cart), title: Text(shoppingList[index]), onTap: () => setState(() => shoppingList.removeAt(index)));
-  }); }
+  Widget _buildBookPage() { return const Center(child: Text("図鑑モード")); }
+  Widget _buildShoppingPage() { return const Center(child: Text("買出リスト")); }
 }
