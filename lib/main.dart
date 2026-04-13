@@ -25,7 +25,11 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   bool autoShoppingAdd = true;
   Color customColor = const Color(0xFF1B5E20);
 
-  // 指定された膨大なカラーリストを定義
+  // 食材の選択肢リスト
+  final List<String> _foodOptions = ["牛肉", "豚肉", "鶏肉", "鮭", "鯖", "キャベツ", "レタス", "トマト", "牛乳", "卵", "納豆", "米", "パン"];
+  String _selectedFoodName = "牛肉";
+
+  // カラーパレット定義
   final List<Map<String, dynamic>> colorPalette = [
     {"name": "IndianRed", "color": Color(0xFFCD5C5C)},
     {"name": "LightCoral", "color": Color(0xFFF08080)},
@@ -67,7 +71,6 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
 
   String selectedIcon = "🥩";
   final List<String> icons = ["🥩", "🐟", "🥦", "🍎", "🥛", "🍚", "📦"];
-  final TextEditingController _nameController = TextEditingController();
   final TextEditingController _dateController = TextEditingController(text: "3");
   final TextEditingController _countController = TextEditingController(text: "1");
   String _selectedUnit = "個";
@@ -80,22 +83,13 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     super.initState();
     _blinkController = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..repeat(reverse: true);
     _loadData();
-    _nameController.addListener(_autoDetectRice);
-  }
-
-  void _autoDetectRice() {
-    String text = _nameController.text;
-    if (text.contains("米") || text.contains("こめ") || text.contains("コメ")) {
-      if (_selectedUnit != "kg") {
-        setState(() { _selectedUnit = "kg"; selectedIcon = "🍚"; _countController.text = "5"; _dateController.text = "365"; });
-      }
-    }
   }
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('modeIndex', modeIndex);
     await prefs.setString('inventory', jsonEncode(inventory));
+    await prefs.setString('shoppingList', jsonEncode(shoppingCode()));
     await prefs.setString('shoppingList', jsonEncode(shoppingList));
     await prefs.setString('recentlyConsumed', jsonEncode(recentlyConsumed));
     await prefs.setBool('autoShoppingAdd', autoShoppingAdd);
@@ -198,15 +192,32 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     ]);
   }
 
-  // --- UI: 登録画面 ---
+  // --- UI: 登録画面 (プルダウン形式) ---
   Widget _buildAddView(Color textColor) {
     return SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text("🎨 アイコン", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+      Text("🎨 アイコン選択", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
       const SizedBox(height: 10),
       Wrap(spacing: 10, children: icons.map((icon) => GestureDetector(onTap: () => setState(() => selectedIcon = icon), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: selectedIcon == icon ? Colors.yellowAccent : Colors.white12, borderRadius: BorderRadius.circular(8)), child: Text(icon, style: const TextStyle(fontSize: 24))))).toList()),
+      const SizedBox(height: 25),
+
+      Text("📄 食材を選択", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 10),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(border: Border.all(color: textColor.withOpacity(0.5)), borderRadius: BorderRadius.circular(8)),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selectedFoodName,
+            isExpanded: true,
+            dropdownColor: Colors.grey[900],
+            style: TextStyle(color: textColor, fontSize: 18),
+            items: _foodOptions.map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
+            onChanged: (v) => setState(() => _selectedFoodName = v!),
+          ),
+        ),
+      ),
+
       const SizedBox(height: 20),
-      TextField(controller: _nameController, style: TextStyle(color: textColor), decoration: InputDecoration(labelText: "食材名", labelStyle: TextStyle(color: textColor.withOpacity(0.6)), enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: textColor.withOpacity(0.3))))),
-      const SizedBox(height: 15),
       Row(children: [
         Expanded(child: TextField(controller: _countController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "初期数", labelStyle: TextStyle(color: textColor.withOpacity(0.6))))),
         const SizedBox(width: 10),
@@ -216,12 +227,10 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
       TextField(controller: _dateController, style: TextStyle(color: textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: "期限（あと何日？）", labelStyle: TextStyle(color: textColor.withOpacity(0.6)))),
       const SizedBox(height: 40),
       SizedBox(width: double.infinity, height: 55, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.yellowAccent), onPressed: () {
-        if (_nameController.text.isNotEmpty) {
-          setState(() {
-            inventory.add({"name": _nameController.text, "icon": selectedIcon, "limit": "あと${_dateController.text}日", "count": double.tryParse(_countController.text) ?? 1.0, "unit": _selectedUnit});
-          });
-          _nameController.clear(); _saveData(); setState(() => _currentTabIndex = 0);
-        }
+        setState(() {
+          inventory.add({"name": _selectedFoodName, "icon": selectedIcon, "limit": "あと${_dateController.text}日", "count": double.tryParse(_countController.text) ?? 1.0, "unit": _selectedUnit});
+        });
+        _saveData(); setState(() => _currentTabIndex = 0);
       }, child: const Text("冒険の書に登録！", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold))))
     ]));
   }
@@ -338,3 +347,5 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     );
   }
 }
+
+String shoppingCode() => ""; // ダミー関数（セーブ用）
