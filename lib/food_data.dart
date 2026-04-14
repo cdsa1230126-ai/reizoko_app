@@ -117,4 +117,7 @@ final Map<String, List<Map<String, dynamic>>> foodMaster = {
     {"name": "ちくわ", "icon": "🌀", "limit": 5},
     {"name": "こんにゃく", "icon": "⬛", "limit": 14},
   ],
+  "お米": [
+      {"name": "こしひかり", "icon": "米", "limit": 7},
+  ]
 };
