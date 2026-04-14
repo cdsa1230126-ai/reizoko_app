@@ -23,18 +23,29 @@ class _ReizokoAppState extends State<ReizokoApp> {
   int _currentTabIndex = 0;
   int modeIndex = 0;
   List<dynamic> inventory = [];     
-  List<dynamic> userMaster = []; // ユーザーが登録した食材マスタ
+  List<dynamic> userMaster = []; 
   Color customColor = const Color(0xFF1B5E20);
   
-  // 入力用コントローラー
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _unitController = TextEditingController(text: "個");
   final TextEditingController _limitController = TextEditingController(text: "3");
+  String _selectedCategory = "その他";
   double _inputCount = 1.0;
+
+  // --- 拡張版：標準食材マスタ ---
+  final List<Map<String, dynamic>> defaultMaster = [
+    {"name": "お米", "unit": "kg", "limit": 180, "icon": "🌾", "cat": "主食"},
+    {"name": "鶏むね肉", "unit": "g", "limit": 2, "icon": "🍗", "cat": "肉類"},
+    {"name": "豚バラ肉", "unit": "g", "limit": 3, "icon": "🥩", "cat": "肉類"},
+    {"name": "たまねぎ", "unit": "個", "limit": 21, "icon": "🧅", "cat": "野菜"},
+    {"name": "卵", "unit": "個", "limit": 14, "icon": "🥚", "cat": "乳製品"},
+    {"name": "牛乳", "unit": "ml", "limit": 5, "icon": "🥛", "cat": "乳製品"},
+    {"name": "食パン", "unit": "枚", "limit": 5, "icon": "🍞", "cat": "主食"},
+  ];
 
   final List<Map<String, dynamic>> charSettings = [
     {"name": "🧓 長老", "msg": "おぉ、それは良い食材じゃ。"},
-    {"name": "🧑‍⚕️ 博士", "msg": "フム、実に興味深い食材だ。"},
+    {"name": "🧑‍⚕️ 博士", "msg": "フム、実に興味深い。"},
     {"name": "🕶️ 商人", "msg": "まいど！良い仕入れですな！"},
   ];
 
@@ -42,6 +53,33 @@ class _ReizokoAppState extends State<ReizokoApp> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  // 自動補完（アイコンやカテゴリーも補完）
+  void _autoFill(String name) {
+    final all = [...userMaster, ...defaultMaster];
+    try {
+      final found = all.firstWhere((e) => e["name"] == name);
+      setState(() {
+        _unitController.text = found["unit"];
+        _limitController.text = found["limit"].toString();
+        _selectedCategory = found["cat"] ?? "その他";
+      });
+    } catch (_) {}
+  }
+
+  // アイコンを判定する
+  String _getIcon(String name, String cat) {
+    final all = [...userMaster, ...defaultMaster];
+    try {
+      return all.firstWhere((e) => e["name"] == name)["icon"];
+    } catch (_) {
+      if (cat == "肉類") return "🥩";
+      if (cat == "野菜") return "🥬";
+      if (cat == "主食") return "🍚";
+      if (cat == "乳製品") return "🧀";
+      return "📦";
+    }
   }
 
   Future<void> _loadData() async {
@@ -63,60 +101,53 @@ class _ReizokoAppState extends State<ReizokoApp> {
     await prefs.setInt('savedColor', customColor.value);
   }
 
-  void _speak(String text) {
-    js.context.callMethod('eval', ["""
-      window.speechSynthesis.cancel();
-      const uttr = new SpeechSynthesisUtterance('$text');
-      uttr.lang = 'ja-JP';
-      window.speechSynthesis.speak(uttr);
-    """]);
-  }
-
-  void _addFood(String name, String unit, int limit, double count) {
+  void _addFood() {
+    String name = _nameController.text;
     if (name.isEmpty) return;
-    // お米またはkg単位なら0.15(1合)をステップにする
-    double step = (name == "お米" || unit == "kg") ? 0.15 : 1.0;
-    final expiryDate = DateTime.now().add(Duration(days: limit));
+    
+    String icon = _getIcon(name, _selectedCategory);
+    double step = (name.contains("米") || _unitController.text == "kg") ? 0.15 : 1.0;
+    final expiryDate = DateTime.now().add(Duration(days: int.tryParse(_limitController.text) ?? 3));
 
     setState(() {
       inventory.add({
-        "name": name,
-        "icon": "📦",
-        "expiry": expiryDate.toIso8601String(),
-        "count": count,
-        "unit": unit,
-        "step": step,
+        "name": name, "icon": icon, "expiry": expiryDate.toIso8601String(),
+        "count": _inputCount, "unit": _unitController.text, "step": step,
       });
-      if (!userMaster.any((e) => e["name"] == name)) {
-        userMaster.add({"name": name, "unit": unit, "limit": limit});
+      if (![...userMaster, ...defaultMaster].any((e) => e["name"] == name)) {
+        userMaster.add({
+          "name": name, "unit": _unitController.text, 
+          "limit": int.tryParse(_limitController.text) ?? 3, 
+          "icon": icon, "cat": _selectedCategory
+        });
       }
     });
-    _speak("${charSettings[modeIndex]["msg"]} $nameを登録したぞ。");
+    _speak("${charSettings[modeIndex]["msg"]} $nameを入れたぞ。");
     _nameController.clear();
+    _inputCount = 1.0;
     _saveData();
+    setState(() => _currentTabIndex = 0);
+  }
+
+  void _speak(String text) {
+    js.context.callMethod('eval', ["""window.speechSynthesis.cancel(); const uttr = new SpeechSynthesisUtterance('$text'); uttr.lang = 'ja-JP'; window.speechSynthesis.speak(uttr);"""]);
   }
 
   @override
   Widget build(BuildContext context) {
-    // 明るさに応じて文字色を自動変更
     Color textColor = customColor.computeLuminance() > 0.4 ? Colors.black : Colors.white;
 
     return Scaffold(
       backgroundColor: customColor,
       appBar: AppBar(
-        title: Text("${charSettings[modeIndex]["name"]}の冷蔵庫", 
-          style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+        title: Text("${charSettings[modeIndex]["name"]}の冷蔵庫", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.black26,
         elevation: 0,
         actions: [IconButton(icon: const Icon(Icons.palette), onPressed: _showSettingsDialog)],
       ),
-      body: IndexedStack(
-        index: _currentTabIndex,
-        children: [
-          _buildInventoryView(textColor),
-          _buildAddView(textColor),
-          _buildMasterView(textColor),
-        ],
+      body: SafeArea(
+        child: _currentTabIndex == 0 ? _buildInventoryView(textColor) :
+              _currentTabIndex == 1 ? _buildAddView(textColor) : _buildHistoryView(textColor),
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentTabIndex,
@@ -126,14 +157,14 @@ class _ReizokoAppState extends State<ReizokoApp> {
         unselectedItemColor: Colors.white54,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.kitchen), label: "在庫"),
-          BottomNavigationBarItem(icon: Icon(Icons.add_box), label: "登録"),
-          BottomNavigationBarItem(icon: Icon(Icons.list), label: "リスト"),
+          BottomNavigationBarItem(icon: Icon(Icons.add_shopping_cart), label: "登録"),
+          BottomNavigationBarItem(icon: Icon(Icons.auto_awesome), label: "履歴"),
         ],
       ),
     );
   }
 
-  // --- 在庫一覧 ---
+  // --- 在庫一覧 (アイコン付き) ---
   Widget _buildInventoryView(Color textColor) {
     return inventory.isEmpty
         ? Center(child: Text("冷蔵庫は空っぽじゃ。", style: TextStyle(color: textColor, fontSize: 18)))
@@ -142,39 +173,20 @@ class _ReizokoAppState extends State<ReizokoApp> {
             padding: const EdgeInsets.all(12),
             itemBuilder: (context, i) {
               final item = inventory[i];
-              final count = (item["count"] ?? 0).toDouble();
-              final step = (item["step"] ?? 1.0).toDouble();
+              final double count = (item["count"] ?? 0).toDouble();
+              final double step = (item["step"] ?? 1.0).toDouble();
               final days = DateTime.parse(item["expiry"]).difference(DateTime.now()).inDays;
-              
               String displayCount = (count == count.toInt()) ? count.toInt().toString() : count.toStringAsFixed(2);
-              String minusLabel = (item["name"] == "お米" || item["unit"] == "kg") ? "1合使う" : "1${item["unit"]}使う";
 
               return Card(
-                color: days < 0 ? Colors.red.withOpacity(0.4) : Colors.black26,
+                color: days < 0 ? Colors.red.withOpacity(0.5) : Colors.black26,
                 child: ListTile(
-                  title: Text("${item["name"]} × $displayCount ${item["unit"]}", 
-                    style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
-                  subtitle: Text(days < 0 ? "期限切れ！" : "あと $days 日", 
-                    style: TextStyle(color: textColor.withOpacity(0.7))),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, color: Colors.orangeAccent),
-                        onPressed: () {
-                          setState(() {
-                            if (count > step + 0.001) {
-                              inventory[i]["count"] = count - step;
-                            } else {
-                              _speak("${item["name"]}がなくなったぞ。");
-                              inventory.removeAt(i);
-                            }
-                          });
-                          _saveData();
-                        },
-                      ),
-                      Text(minusLabel, style: TextStyle(color: textColor, fontSize: 9)),
-                    ],
+                  leading: Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 30)),
+                  title: Text("${item["name"]} × $displayCount ${item["unit"]}", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+                  subtitle: Text(days < 0 ? "期限切れ！" : "あと $days 日", style: TextStyle(color: textColor.withOpacity(0.7))),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.remove_circle, color: Colors.orangeAccent),
+                    onPressed: () { setState(() { if (count > step + 0.001) { inventory[i]["count"] = count - step; } else { inventory.removeAt(i); } }); _saveData(); },
                   ),
                 ),
               );
@@ -182,113 +194,85 @@ class _ReizokoAppState extends State<ReizokoApp> {
           );
   }
 
-  // --- 登録画面 ---
+  // --- 登録画面 (カテゴリー選択付き) ---
   Widget _buildAddView(Color textColor) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          TextField(
-            controller: _nameController,
-            style: TextStyle(color: textColor),
-            decoration: InputDecoration(labelText: "食材名", labelStyle: TextStyle(color: textColor), 
-              filled: true, fillColor: Colors.black12, border: const OutlineInputBorder()),
-            onChanged: (v) {
-              // お米と入力されたら単位をkgに自動提案
-              if(v == "お米") setState(() => _unitController.text = "kg");
-            },
-          ),
-          const SizedBox(height: 15),
-          Row(
-            children: [
-              Expanded(child: TextField(controller: _unitController, style: TextStyle(color: textColor), 
-                decoration: InputDecoration(labelText: "単位", labelStyle: TextStyle(color: textColor)))),
-              const SizedBox(width: 15),
-              Expanded(child: TextField(controller: _limitController, keyboardType: TextInputType.number, 
-                style: TextStyle(color: textColor), decoration: InputDecoration(labelText: "期限(日)", labelStyle: TextStyle(color: textColor)))),
-            ],
-          ),
-          const SizedBox(height: 25),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text("数量: ", style: TextStyle(color: textColor, fontSize: 18)),
-            IconButton(icon: Icon(Icons.remove_circle, color: textColor), onPressed: () => setState(() { if(_inputCount > 1) _inputCount--; })),
-            Text("${_inputCount.toInt()}", style: TextStyle(color: textColor, fontSize: 32, fontWeight: FontWeight.bold)),
-            IconButton(icon: Icon(Icons.add_circle, color: textColor), onPressed: () => setState(() => _inputCount++)),
-          ]),
-          const SizedBox(height: 25),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 60), backgroundColor: Colors.yellowAccent),
-            onPressed: () {
-              _addFood(_nameController.text, _unitController.text, int.tryParse(_limitController.text) ?? 3, _inputCount);
-              setState(() => _currentTabIndex = 0);
-            },
-            child: const Text("登録する", style: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold)),
-          ),
-        ],
+      child: Column(children: [
+        Autocomplete<String>(
+          optionsBuilder: (v) => [...userMaster, ...defaultMaster].map((e) => e["name"] as String).where((s) => s.contains(v.text)),
+          onSelected: (name) { _nameController.text = name; _autoFill(name); },
+          fieldViewBuilder: (ctx, ctrl, focus, onSubmitted) {
+            ctrl.addListener(() => _nameController.text = ctrl.text);
+            return TextField(
+              controller: ctrl, focusNode: focus, onChanged: _autoFill,
+              style: TextStyle(color: textColor),
+              decoration: InputDecoration(labelText: "食材名を入力...", labelStyle: TextStyle(color: textColor), filled: true, fillColor: Colors.black12, prefixIcon: const Icon(Icons.search)),
+            );
+          },
+        ),
+        const SizedBox(height: 20),
+        Row(children: [
+          Expanded(child: _buildDropdown("カテゴリー", ["肉類", "野菜", "主食", "乳製品", "その他"], _selectedCategory, (v) => setState(() => _selectedCategory = v!))),
+          const SizedBox(width: 10),
+          Expanded(child: TextField(controller: _unitController, style: TextStyle(color: textColor), decoration: InputDecoration(labelText: "単位", labelStyle: TextStyle(color: textColor)))),
+        ]),
+        const SizedBox(height: 20),
+        TextField(controller: _limitController, keyboardType: TextInputType.number, style: TextStyle(color: textColor), decoration: InputDecoration(labelText: "賞味期限 (日)", labelStyle: TextStyle(color: textColor))),
+        const SizedBox(height: 30),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          IconButton(icon: Icon(Icons.remove_circle_outline, color: textColor, size: 40), onPressed: () => setState(() { if(_inputCount > 1) _inputCount--; })),
+          const SizedBox(width: 20),
+          Text("${_inputCount.toInt()}", style: TextStyle(color: textColor, fontSize: 45, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 20),
+          IconButton(icon: Icon(Icons.add_circle_outline, color: textColor, size: 40), onPressed: () => setState(() => _inputCount++)),
+        ]),
+        const SizedBox(height: 40),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 65), backgroundColor: Colors.yellowAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))),
+          onPressed: _addFood,
+          child: const Text("冷蔵庫に保管する", style: TextStyle(color: Colors.black, fontSize: 22, fontWeight: FontWeight.bold)),
+        ),
+      ]),
+    );
+  }
+
+  // --- 履歴画面 (カテゴリーごとに表示) ---
+  Widget _buildHistoryView(Color textColor) {
+    final list = [...userMaster, ...defaultMaster];
+    return ListView.builder(
+      itemCount: list.length,
+      padding: const EdgeInsets.all(12),
+      itemBuilder: (context, i) => Card(
+        color: Colors.white10,
+        child: ListTile(
+          leading: Text(list[i]["icon"] ?? "📦", style: const TextStyle(fontSize: 24)),
+          title: Text(list[i]["name"], style: TextStyle(color: textColor)),
+          subtitle: Text("${list[i]["cat"]} / ${list[i]["unit"]}", style: TextStyle(color: textColor.withOpacity(0.5))),
+          trailing: const Icon(Icons.add_box, color: Colors.yellowAccent),
+          onTap: () { setState(() { _nameController.text = list[i]["name"]; _unitController.text = list[i]["unit"]; _limitController.text = list[i]["limit"].toString(); _selectedCategory = list[i]["cat"] ?? "その他"; _currentTabIndex = 1; }); },
+        ),
       ),
     );
   }
 
-  // --- 学習済みリスト ---
-  Widget _buildMasterView(Color textColor) {
-    return userMaster.isEmpty
-        ? Center(child: Text("まだリストが空じゃ。", style: TextStyle(color: textColor)))
-        : ListView.builder(
-            itemCount: userMaster.length,
-            itemBuilder: (context, i) {
-              final m = userMaster[i];
-              return ListTile(
-                title: Text(m["name"], style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
-                subtitle: Text("単位: ${m["unit"]} / 期限: ${m["limit"]}日", style: TextStyle(color: textColor.withOpacity(0.6))),
-                trailing: const Icon(Icons.send, color: Colors.yellowAccent),
-                onTap: () {
-                  setState(() {
-                    _nameController.text = m["name"];
-                    _unitController.text = m["unit"];
-                    _limitController.text = m["limit"].toString();
-                    _currentTabIndex = 1;
-                  });
-                },
-              );
-            },
-          );
+  Widget _buildDropdown(String label, List<String> items, String value, ValueChanged<String?> onChanged) {
+    return DropdownButtonFormField<String>(
+      value: value, items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+      onChanged: onChanged, decoration: InputDecoration(labelText: label, labelStyle: const TextStyle(color: Colors.white70)),
+      dropdownColor: Colors.black87, style: const TextStyle(color: Colors.white),
+    );
   }
 
-  // --- 設定ダイアログ ---
   void _showSettingsDialog() {
     showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text("アプリの設定"),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text("キャラクター"),
-          ...List.generate(3, (i) => RadioListTile(
-            title: Text(charSettings[i]["name"]), value: i, groupValue: modeIndex,
-            onChanged: (v) { setState(() => modeIndex = v!); _saveData(); Navigator.pop(ctx); },
-          )),
-          const Divider(),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.colorize),
-            label: const Text("1600万色から背景を選ぶ"),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final result = await js.context.callMethod('eval', ["""
-                new Promise((resolve) => {
-                  const input = document.createElement('input');
-                  input.type = 'color';
-                  input.onchange = () => resolve(input.value);
-                  input.click();
-                });
-              """]);
-              if (result != null) {
-                String hex = result.toString().replaceFirst('#', '');
-                setState(() { customColor = Color(int.parse("FF$hex", radix: 16)); });
-                _saveData();
-              }
-            },
-          ),
-        ],
-      ),
+      backgroundColor: Colors.grey[900], title: const Text("アプリ設定", style: TextStyle(color: Colors.white)),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        ...List.generate(3, (i) => RadioListTile(title: Text(charSettings[i]["name"], style: const TextStyle(color: Colors.white)), value: i, groupValue: modeIndex, onChanged: (v) { setState(() => modeIndex = v!); _saveData(); Navigator.pop(ctx); })),
+        const Divider(color: Colors.white24),
+        TextButton.icon(icon: const Icon(Icons.colorize, color: Colors.yellowAccent), label: const Text("背景色を変える", style: TextStyle(color: Colors.yellowAccent)), 
+          onPressed: () async { Navigator.pop(ctx); final result = await js.context.callMethod('eval', ["""new Promise((resolve) => { const input = document.createElement('input'); input.type = 'color'; input.onchange = () => resolve(input.value); input.click(); });"""]); if (result != null) { String hex = result.toString().replaceFirst('#', ''); setState(() { customColor = Color(int.parse("FF$hex", radix: 16)); }); _saveData(); } }),
+      ]),
     ));
   }
 }
