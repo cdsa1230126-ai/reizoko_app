@@ -1,4 +1,4 @@
-// 食材マスターデータ：カテゴリ、食材名、アイコン、消費期限(日)を定義
+// lib/food_data.dart
 final Map<String, List<Map<String, dynamic>>> foodMaster = {
   "肉類": [
     {"name": "鶏むね肉", "icon": "🍗", "limit": 2},
@@ -36,10 +36,12 @@ final Map<String, List<Map<String, dynamic>>> foodMaster = {
     {"name": "マヨネーズ", "icon": "🧴", "limit": 30},
     {"name": "ケチャップ", "icon": "🍅", "limit": 30},
     {"name": "味噌", "icon": "🍲", "limit": 90},
+    {"name": "醤油", "icon": "🍶", "limit": 60},
   ],
   "キノコ類": [
     {"name": "しいたけ", "icon": "🍄", "limit": 5},
     {"name": "しめじ", "icon": "🍄", "limit": 5},
+    {"name": "えのき", "icon": "🍄", "limit": 3},
   ],
   "お菓子": [
     {"name": "チョコ", "icon": "🍫", "limit": 30},
