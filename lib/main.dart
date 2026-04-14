@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'dart:js' as js; // Web用。モバイル化する場合は flutter_tts 等に変更検討
+import 'dart:js' as js;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,47 +21,79 @@ class ReizokoApp extends StatefulWidget {
 
 class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
   int _currentTabIndex = 0;
-  int modeIndex = 0; 
+  int modeIndex = 0; // 0:長老, 1:博士, 2:商人
   List<dynamic> inventory = [];
   Color customColor = const Color(0xFF1B5E20);
   String recipeApiKey = "";
 
+  // --- NPCの設定 ---
   final List<Map<String, dynamic>> charSettings = [
-    {"name": "🧓 長老", "msg": "おぉ、それは良い食材じゃ。大事にするのじゃぞ。", "search": "のレシピを探してきたぞ。心して作るのじゃ。"},
-    {"name": "🧑‍⚕️ 博士", "msg": "フム、実に興味深い食材だ。効率よく調理したまえ。", "search": "の最適な調理法を検索した。データを確認してくれ。"},
-    {"name": "🕶️ 商人", "msg": "まいど！良い仕入れですな。高く売れそうですぞ！", "search": "のレシピを見つけました！これで一儲けですな。"},
+    {"name": "🧓 長老", "msg": "おぉ、それは良い食材じゃ。大事にするのじゃぞ。"},
+    {"name": "🧑‍⚕️ 博士", "msg": "フム、実に興味深い食材だ。効率よく調理したまえ。"},
+    {"name": "🕶️ 商人", "msg": "まいど！良い仕入れですな。高く売れそうですぞ！"},
   ];
 
+  // --- 網羅された食材マスタ（2段階連動用） ---
   final Map<String, List<Map<String, dynamic>>> _foodMaster = {
-    "鶏肉": [
+    "肉類": [
       {"name": "鶏むね肉", "icon": "🍗", "limit": 2},
       {"name": "鶏もも肉", "icon": "🍗", "limit": 2},
-      {"name": "ささみ", "icon": "🍗", "limit": 2},
-      {"name": "手羽先", "icon": "🍗", "limit": 2},
-      {"name": "鶏ひき肉", "icon": "🥩", "limit": 1},
-    ],
-    "豚肉": [
       {"name": "豚バラ肉", "icon": "🥩", "limit": 3},
-      {"name": "豚ロース", "icon": "🥩", "limit": 3},
-      {"name": "豚こま切れ", "icon": "🥩", "limit": 3},
-      {"name": "豚ひき肉", "icon": "🥩", "limit": 2},
+      {"name": "牛ステーキ肉", "icon": "🥩", "limit": 3},
+      {"name": "ひき肉", "icon": "🥡", "limit": 1},
+      {"name": "ハム・ソーセージ", "icon": "🥓", "limit": 7},
     ],
-    "牛肉": [
-      {"name": "牛サーロイン", "icon": "🥩", "limit": 3},
-      {"name": "牛もも肉", "icon": "🥩", "limit": 3},
-      {"name": "牛バラ肉", "icon": "🥩", "limit": 3},
-      {"name": "牛ひき肉", "icon": "🥩", "limit": 2},
+    "魚介類": [
+      {"name": "鮭の切り身", "icon": "🐟", "limit": 3},
+      {"name": "刺身", "icon": "🍣", "limit": 1},
+      {"name": "えび・いか", "icon": "🦐", "limit": 2},
+      {"name": "あじ・いわし", "icon": "🐟", "limit": 2},
     ],
-    "世界・加工品": [
-      {"name": "サーモン", "icon": "🐟", "limit": 2},
-      {"name": "アボカド", "icon": "🥑", "limit": 5},
-      {"name": "生ハム", "icon": "🥓", "limit": 10},
-      {"name": "モッツァレラ", "icon": "🧀", "limit": 7},
-      {"name": "キムチ", "icon": "🌶️", "limit": 14},
+    "野菜": [
+      {"name": "キャベツ", "icon": "🥬", "limit": 7},
+      {"name": "レタス", "icon": "🥗", "limit": 3},
+      {"name": "たまねぎ", "icon": "🧅", "limit": 21},
+      {"name": "にんじん", "icon": "🥕", "limit": 14},
+      {"name": "もやし", "icon": "🌱", "limit": 2},
+      {"name": "ブロッコリー", "icon": "🥦", "limit": 4},
+    ],
+    "果物": [
+      {"name": "りんご", "icon": "🍎", "limit": 14},
+      {"name": "バナナ", "icon": "🍌", "limit": 5},
+      {"name": "いちご", "icon": "🍓", "limit": 2},
+      {"name": "みかん", "icon": "🍊", "limit": 10},
+    ],
+    "飲み物": [
+      {"name": "牛乳", "icon": "🥛", "limit": 5},
+      {"name": "お茶", "icon": "🍵", "limit": 4},
+      {"name": "ジュース", "icon": "🧃", "limit": 4},
+      {"name": "コーヒー", "icon": "☕", "limit": 3},
+      {"name": "炭酸水", "icon": "🥤", "limit": 7},
+      {"name": "ビール", "icon": "🍺", "limit": 30},
+    ],
+    "調味料": [
+      {"name": "マヨネーズ", "icon": "🧴", "limit": 30},
+      {"name": "ケチャップ", "icon": "🍅", "limit": 30},
+      {"name": "味噌", "icon": "🍲", "limit": 90},
+      {"name": "醤油", "icon": "🍶", "limit": 60},
+      {"name": "焼肉のタレ", "icon": "🧴", "limit": 30},
+    ],
+    "キノコ類": [
+      {"name": "しいたけ", "icon": "🍄", "limit": 5},
+      {"name": "しめじ", "icon": "🍄", "limit": 5},
+      {"name": "えのき", "icon": "🍄", "limit": 3},
+      {"name": "エリンギ", "icon": "🍄", "limit": 5},
+    ],
+    "お菓子": [
+      {"name": "チョコレート", "icon": "🍫", "limit": 30},
+      {"name": "アイスクリーム", "icon": "🍦", "limit": 60},
+      {"name": "ケーキ", "icon": "🍰", "limit": 1},
+      {"name": "ポテトチップス", "icon": "🥔", "limit": 20},
+      {"name": "プリン", "icon": "🍮", "limit": 3},
     ],
   };
 
-  String _selectedCategory = "鶏肉";
+  String _selectedCategory = "肉類";
   String _selectedFoodName = "鶏むね肉";
   final TextEditingController _customFoodController = TextEditingController();
 
@@ -102,7 +134,6 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     await prefs.setInt('savedColor', customColor.value);
   }
 
-  // --- 追加：期限までの残り日数を計算する関数 ---
   int _calculateDaysLeft(String expiryDateStr) {
     final expiry = DateTime.parse(expiryDateStr);
     final now = DateTime.now();
@@ -120,7 +151,10 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
         elevation: 0,
         iconTheme: IconThemeData(color: _dynamicTextColor),
         actions: [
-          IconButton(icon: Icon(Icons.settings, color: _dynamicTextColor), onPressed: _showSettingsDialog),
+          IconButton(
+            icon: Icon(Icons.settings, color: _dynamicTextColor),
+            onPressed: _showSettingsDialog,
+          ),
         ],
       ),
       body: IndexedStack(
@@ -146,115 +180,138 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     );
   }
 
-  // --- 1. 在庫一覧（残り日数を表示するように変更） ---
+  // --- 1. 在庫一覧画面 ---
   Widget _buildInventoryView() {
-    return ListView.builder(
-      itemCount: inventory.length,
-      padding: const EdgeInsets.all(12),
-      itemBuilder: (context, index) {
-        final item = inventory[index];
-        final daysLeft = _calculateDaysLeft(item["expiry"]);
-        final isExpired = daysLeft < 0;
+    return inventory.isEmpty 
+      ? Center(child: Text("冷蔵庫は空っぽじゃ。", style: TextStyle(color: _dynamicTextColor, fontSize: 18)))
+      : ListView.builder(
+          itemCount: inventory.length,
+          padding: const EdgeInsets.all(12),
+          itemBuilder: (context, index) {
+            final item = inventory[index];
+            final daysLeft = _calculateDaysLeft(item["expiry"]);
+            final isExpired = daysLeft < 0;
 
-        return Card(
-          color: isExpired ? Colors.red.withOpacity(0.3) : Colors.black38,
-          child: ListTile(
-            leading: Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 26)),
-            title: Text(item["name"], style: TextStyle(color: _dynamicTextColor)),
-            subtitle: Text(
-              isExpired ? "期限切れ！" : "あと $daysLeft 日",
-              style: TextStyle(color: isExpired ? Colors.redAccent : _dynamicTextColor.withOpacity(0.7)),
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.check_circle_outline, color: Colors.greenAccent),
-              onPressed: () {
-                _speak("${item["name"]}を使い切りましたな！お見事です！");
-                setState(() { inventory.removeAt(index); _saveData(); });
-              },
-            ),
-          ),
+            return Card(
+              color: isExpired ? Colors.red.withOpacity(0.4) : Colors.black38,
+              child: ListTile(
+                leading: Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 26)),
+                title: Text(item["name"], style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                  isExpired ? "期限切れ！" : "あと $daysLeft 日",
+                  style: TextStyle(color: isExpired ? Colors.redAccent : _dynamicTextColor.withOpacity(0.7)),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.check_circle_outline, color: Colors.greenAccent),
+                  onPressed: () {
+                    _speak("${item["name"]}を使い切りましたな！お見事！");
+                    setState(() { inventory.removeAt(index); _saveData(); });
+                  },
+                ),
+              ),
+            );
+          },
         );
-      },
-    );
   }
 
-  // --- 2. 登録（マスターデータの反映と日付計算を追加） ---
+  // --- 2. 登録画面（2段階連動プルダウン） ---
   Widget _buildAddView() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("カテゴリ選択", style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
-          DropdownButton<String>(
-            value: _selectedCategory,
-            isExpanded: true,
-            dropdownColor: Colors.grey[900],
-            style: TextStyle(color: _dynamicTextColor),
-            items: _foodMaster.keys.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-            onChanged: (v) {
-              setState(() {
-                _selectedCategory = v!;
-                _selectedFoodName = _foodMaster[v]![0]["name"];
-              });
-            },
+          // カテゴリ選択（大分類）
+          Text("1. カテゴリを選択", style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)),
+            child: DropdownButton<String>(
+              value: _selectedCategory,
+              isExpanded: true,
+              underline: const SizedBox(),
+              dropdownColor: Colors.grey[900],
+              style: TextStyle(color: _dynamicTextColor, fontSize: 16),
+              items: _foodMaster.keys.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+              onChanged: (v) {
+                setState(() {
+                  _selectedCategory = v!;
+                  // カテゴリが変わったら、食材名の初期値をそのカテゴリの最初のアイテムにリセット
+                  _selectedFoodName = _foodMaster[v]![0]["name"];
+                });
+              },
+            ),
           ),
-          const SizedBox(height: 20),
-          Text("食材を選択", style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
-          DropdownButton<String>(
-            value: _selectedFoodName,
-            isExpanded: true,
-            dropdownColor: Colors.grey[900],
-            style: TextStyle(color: _dynamicTextColor),
-            items: _foodMaster[_selectedCategory]!.map((f) => DropdownMenuItem(value: f["name"] as String, child: Text("${f["icon"]} ${f["name"]}"))).toList(),
-            onChanged: (v) => setState(() => _selectedFoodName = v!),
+          const SizedBox(height: 24),
+
+          // 食材選択（小分類）
+          Text("2. 食材を選択", style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)),
+            child: DropdownButton<String>(
+              value: _selectedFoodName,
+              isExpanded: true,
+              underline: const SizedBox(),
+              dropdownColor: Colors.grey[900],
+              style: TextStyle(color: _dynamicTextColor, fontSize: 16),
+              items: _foodMaster[_selectedCategory]!.map((f) => DropdownMenuItem(
+                value: f["name"] as String, 
+                child: Text("${f["icon"]} ${f["name"]} (目安: ${f["limit"]}日)")
+              )).toList(),
+              onChanged: (v) => setState(() => _selectedFoodName = v!),
+            ),
           ),
-          const SizedBox(height: 20),
-          Text("自由入力（名前を変えたい場合）", style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 24),
+
+          // 自由入力
+          Text("3. 自由入力（名前を変えたい場合）", style: TextStyle(color: _dynamicTextColor, fontWeight: FontWeight.bold)),
           TextField(
             controller: _customFoodController,
             style: TextStyle(color: _dynamicTextColor),
             decoration: InputDecoration(
-              hintText: "例: 特売の鶏肉",
+              hintText: "例: 特売の$_selectedFoodName",
               hintStyle: TextStyle(color: _dynamicTextColor.withOpacity(0.4)),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _dynamicTextColor.withOpacity(0.5))),
             ),
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 40),
+
+          // 登録ボタン
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.yellowAccent, minimumSize: const Size(double.infinity, 50)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.yellowAccent, 
+              minimumSize: const Size(double.infinity, 55),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+            ),
             onPressed: () {
               final name = _customFoodController.text.isNotEmpty ? _customFoodController.text : _selectedFoodName;
+              final masterData = _foodMaster[_selectedCategory]!.firstWhere((e) => e["name"] == _selectedFoodName);
               
-              // マスターからアイコンと期限(limit)を取得
-              final masterItem = _foodMaster[_selectedCategory]!.firstWhere((e) => e["name"] == _selectedFoodName);
-              final icon = masterItem["icon"];
-              final int limitDays = masterItem["limit"];
-              
-              // 現在の日付にlimitを足して保存
-              final expiryDate = DateTime.now().add(Duration(days: limitDays));
-
               _speak(charSettings[modeIndex]["msg"]);
               
               setState(() {
                 inventory.add({
                   "name": name,
-                  "icon": icon,
-                  "expiry": expiryDate.toIso8601String(),
+                  "icon": masterData["icon"],
+                  "expiry": DateTime.now().add(Duration(days: masterData["limit"])).toIso8601String(),
                 });
               });
 
               _customFoodController.clear();
               _saveData();
-              setState(() => _currentTabIndex = 0);
+              setState(() => _currentTabIndex = 0); // 在庫タブへ移動
             },
-            child: const Text("冷蔵庫に入れる", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            child: const Text("冷蔵庫に収納する", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16)),
           )
         ],
       ),
     );
   }
 
-  // --- 3. API設定（変更なし） ---
+  // --- 3. API設定画面 ---
   Widget _buildRecipeSettingView() {
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -267,15 +324,23 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
           TextField(
             obscureText: true,
             style: TextStyle(color: _dynamicTextColor),
-            decoration: InputDecoration(enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: _dynamicTextColor))),
+            decoration: InputDecoration(
+              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: _dynamicTextColor)),
+              focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.yellowAccent)),
+            ),
             onChanged: (v) { recipeApiKey = v; _saveData(); },
           ),
-          TextButton(onPressed: () => js.context.callMethod('open', ['https://platform.openai.com/api-keys']), child: const Text("キーの取得はこちら")),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: () => js.context.callMethod('open', ['https://platform.openai.com/api-keys']), 
+            child: const Text("キーの取得はこちら", style: TextStyle(color: Colors.cyanAccent))
+          ),
         ],
       ),
     );
   }
 
+  // アプリ設定ダイアログ
   void _showSettingsDialog() {
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text("アプリ設定"),
@@ -301,7 +366,14 @@ class _ReizokoAppState extends State<ReizokoApp> with TickerProviderStateMixin {
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text("色選択"),
       content: Wrap(
-        children: [Colors.red, Colors.blue, Colors.green, Colors.black, Colors.orange, Colors.purple].map((c) => GestureDetector(
+        children: [
+          const Color(0xFF1B5E20), // 深緑
+          const Color(0xFF0D47A1), // 深青
+          const Color(0xFFB71C1C), // 深赤
+          const Color(0xFF4A148C), // 紫
+          const Color(0xFFE65100), // オレンジ
+          Colors.black
+        ].map((c) => GestureDetector(
           onTap: () { setState(() => customColor = c); _saveData(); Navigator.pop(ctx); },
           child: Container(width: 50, height: 50, color: c, margin: const EdgeInsets.all(4)),
         )).toList(),
