@@ -76,9 +76,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
 
   String _getIcon(String n) {
     for (var c in foodMaster.values) {
-      for (var i in c) {
-        if (i["name"] == n) return i["icon"];
-      }
+      for (var i in c) { if (i["name"] == n) return i["icon"]; }
     }
     return "📦";
   }
@@ -92,12 +90,10 @@ class _ReizokoAppState extends State<ReizokoApp> {
     });
   }
 
-  // --- 買い物リストから在庫へ戻すコアロジック ---
+  // 買い物リストから在庫へ戻す
   void _restockFromShop(int index) {
     setState(() {
       final item = shoppingList[index];
-      
-      // 元の食材データをマスターから探して期限などを再設定
       Map<String, dynamic>? master;
       for(var list in foodMaster.values) {
         for(var m in list) { if(m["name"] == item["name"]) master = m; }
@@ -106,25 +102,17 @@ class _ReizokoAppState extends State<ReizokoApp> {
       final double restockAmount = (master?["unit"] == "g" || master?["unit"] == "ml") ? 500.0 : 1.0;
       final String newExpiry = DateTime.now().add(Duration(days: master?["limit"] ?? 3)).toIso8601String();
 
-      // 在庫に既にあるか確認
       int existingIdx = inventory.indexWhere((i) => i["name"] == item["name"]);
-
       if (existingIdx != -1) {
-        // 既にあるなら個数を足して、期限を更新
         inventory[existingIdx]["count"] += restockAmount;
         inventory[existingIdx]["expiry"] = newExpiry;
       } else {
-        // ないなら新規追加
         inventory.add({
-          "name": item["name"],
-          "icon": item["icon"],
-          "expiry": newExpiry,
-          "count": restockAmount,
-          "unit": master?["unit"] ?? "個",
+          "name": item["name"], "icon": item["icon"], "expiry": newExpiry,
+          "count": restockAmount, "unit": master?["unit"] ?? "個",
           "step": (master?["unit"] == "g" || master?["unit"] == "ml") ? 50.0 : 1.0,
         });
       }
-
       _speak("${item["name"]}を補充したぞ！");
       shoppingList.removeAt(index);
       _save();
@@ -184,7 +172,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
                 if (item["count"] <= 0) {
                   shoppingList.add({"name": item["name"], "icon": item["icon"]});
                   inventory.removeAt(i);
-                  _speak("${item['name']}がなくなったので買い物リストに入れたぞ。");
+                  _speak("${item['name']}を買い物リストに入れたぞ。");
                 }
                 _save();
               })),
@@ -260,7 +248,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
             subtitle: const Text("チェックで在庫に補充するぞ", style: TextStyle(color: Colors.white38, fontSize: 10)),
             trailing: IconButton(
               icon: const Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 30),
-              onPressed: () => _restockFromShop(i), // ここで補充ロジックを呼ぶ
+              onPressed: () => _restockFromShop(i),
             ),
           ),
         );
@@ -287,7 +275,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
     }
     setState(() { _isAiLoading = true; _aiResult = ""; });
     final ingredients = inventory.map((e) => "${e['name']}(${e['count']}${e['unit']})").join(", ");
-    final prompt = "あなたは${chars[modeIndex]['n']}です。${ingredients}を使ってレシピを提案してください。";
+    final prompt = "あなたは${chars[modeIndex]['n']}です。${ingredients}を使って気分に合わせたレシピを1つ提案してください。";
     try {
       final response = await http.post(
         Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=$_apiKey"),
@@ -305,6 +293,33 @@ class _ReizokoAppState extends State<ReizokoApp> {
     }
   }
 
+  void _showApiKeySetting() {
+    TextEditingController controller = TextEditingController(text: _apiKey);
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text("🔑 Gemini API設定", style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(filled: true, fillColor: Colors.black, hintText: "API Keyを貼り付け"),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("キャンセル")),
+            ElevatedButton(onPressed: () {
+              setState(() => _apiKey = controller.text.trim());
+              _save();
+              Navigator.pop(ctx);
+            }, child: const Text("保存")),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _label(String t, Color c) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(t, style: TextStyle(color: c, fontWeight: FontWeight.bold)));
 
   Widget _drop(List<String> items, String val, ValueChanged<String?> onC) => Container(
@@ -312,17 +327,12 @@ class _ReizokoAppState extends State<ReizokoApp> {
     child: DropdownButton<String>(value: val, items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: onC, isExpanded: true, underline: Container(), dropdownColor: Colors.black87, style: const TextStyle(color: Colors.white))
   );
 
-  void _showApiKeySetting() {
-    TextEditingController controller = TextEditingController(text: _apiKey);
-    showDialog(context: context, builder: (ctx) => AlertDialog(backgroundColor: Colors.grey[900], title: const Text("🔑 API設定", style: TextStyle(color: Colors.white)), content: TextField(controller: controller, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "Gemini API Key")), actions: [ElevatedButton(onPressed: () { setState(() => _apiKey = controller.text.trim()); _save(); Navigator.pop(ctx); }, child: const Text("保存"))]));
-  }
-
   void _showFoodSelector() {
     var foodList = foodMaster[_cat] ?? [];
     showModalBottomSheet(context: context, backgroundColor: Colors.grey[900], builder: (ctx) => ListView.builder(itemCount: foodList.length, itemBuilder: (context, i) => ListTile(leading: Text(foodList[i]["icon"]), title: Text(foodList[i]["name"], style: const TextStyle(color: Colors.white)), onTap: () { _updateFoodSelection(foodList[i]["name"]); Navigator.pop(ctx); })));
   }
 
   void _showSettings() {
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("キャラ・設定変更"), content: Column(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) => ListTile(leading: Text(chars[i]["i"]), title: Text(chars[i]["n"]), onTap: () { setState(() => modeIndex = i); Navigator.pop(ctx); })))));
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("設定"), content: Column(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) => ListTile(leading: Text(chars[i]["i"]), title: Text(chars[i]["n"]), onTap: () { setState(() => modeIndex = i); Navigator.pop(ctx); })))));
   }
 }
