@@ -34,6 +34,10 @@ final Map<String, List<Map<String, dynamic>>> foodMaster = {
     {"name": "合挽き肉", "icon": "🥡", "limit": 1},
     {"name": "ラム肉", "icon": "🥡", "limit": 1},
     {"name": "桜肉", "icon": "🥡", "limit": 1},
+    {"name": "豚こま肉", "icon": "🥡", "limit": 3},
+    {"name": "牛ステーキ肉", "icon": "🥡", "limit": 3},
+    {"name": "牛細切れ肉", "icon": "🥡", "limit": 3},
+    {"name": "厚切りベーコン", "icon": "🥡", "limit": 7},
   ],
   "乳製品・大豆製品": [
     {"name": "白鶏卵", "icon": "🥚", "limit": 7},

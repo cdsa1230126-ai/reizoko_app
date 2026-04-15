@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:js' as js;
 import 'food_data.dart';
+import 'package:http/http.dart' as http; // 追加：API通信用
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,12 @@ class _ReizokoAppState extends State<ReizokoApp> {
   List<dynamic> inventory = [], shoppingList = [];
   Color customColor = const Color(0xFF1B5E20);
   String _apiKey = "";
+
+  // 追加：AIレシピ用ステート
+  String _aiMood = "🥗 ヘルシー";
+  String _aiResult = "";
+  bool _isAiLoading = false;
+  final List<String> moods = ["🥗 ヘルシー", "🍖 ガッツリ", "⏱️ 時短"];
 
   // 登録用ステート
   String _cat = "肉類", _name = "鶏むね肉", _unit = "個", _vUnit = "ml";
@@ -67,6 +74,36 @@ class _ReizokoAppState extends State<ReizokoApp> {
   String _getIcon(String n) {
     for (var c in foodMaster.values) { for (var i in c) { if (i["name"] == n) return i["icon"]; } }
     return "📦";
+  }
+
+  // --- 追加：Gemini API連携関数 ---
+  Future<void> _generateRecipe() async {
+    if (_apiKey.isEmpty || inventory.isEmpty) return;
+    setState(() { _isAiLoading = true; _aiResult = ""; });
+
+    final ingredients = inventory.map((e) => "${e['name']}(${e['count']}${e['unit']})").join(", ");
+    final charName = chars[modeIndex]["n"];
+    final prompt = "あなたは$charNameです。冷蔵庫にある「$ingredients」を使って、気分が「$_aiMood」にぴったりの料理レシピを1つ提案してください。$charNameらしい口調で、材料と手順を簡潔に教えてください。";
+
+    try {
+      final response = await http.post(
+        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_apiKey"),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({"contents": [{"parts": [{"text": prompt}]}]}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() { _aiResult = data['candidates'][0]['content']['parts'][0]['text']; });
+        _speak("レシピが完成したぞ。");
+      } else {
+        setState(() { _aiResult = "通信エラーじゃ。APIキーを確認しておくれ。"; });
+      }
+    } catch (e) {
+      setState(() { _aiResult = "エラーが発生したわい。接続を確認してな。"; });
+    } finally {
+      setState(() { _isAiLoading = false; });
+    }
   }
 
   // --- 【おもてなし】APIキー設定ダイアログ ---
@@ -319,6 +356,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
+  // --- 修正：AIレシピタブ ---
   Widget _buildRec(Color textColor) {
     if (_apiKey.isEmpty) {
       return Center(
@@ -331,7 +369,47 @@ class _ReizokoAppState extends State<ReizokoApp> {
         ]),
       );
     }
-    return Center(child: Text("${chars[modeIndex]["n"]}がレシピを考え中じゃ...", textAlign: TextAlign.center, style: TextStyle(color: textColor, fontSize: 18)));
+    
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(15.0),
+          child: Column(
+            children: [
+              Text("今の気分を選んでおくれ", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: moods.map((m) => ChoiceChip(
+                  label: Text(m),
+                  selected: _aiMood == m,
+                  onSelected: (v) => setState(() => _aiMood = m),
+                  selectedColor: Colors.yellowAccent,
+                  labelStyle: TextStyle(color: _aiMood == m ? Colors.black : Colors.white),
+                )).toList(),
+              ),
+              const SizedBox(height: 15),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.auto_awesome),
+                label: Text("${chars[modeIndex]["n"]}にレシピを聞く"),
+                onPressed: (inventory.isEmpty || _isAiLoading) ? null : _generateRecipe,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
+              ),
+            ],
+          ),
+        ),
+        const Divider(color: Colors.white24),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: _isAiLoading 
+              ? const Center(child: CircularProgressIndicator(color: Colors.yellowAccent))
+              : Text(_aiResult.isEmpty ? "${chars[modeIndex]["n"]}がレシピを考え中じゃ..." : _aiResult, 
+                  style: TextStyle(color: textColor, fontSize: 16, height: 1.5)),
+          ),
+        ),
+      ],
+    );
   }
 
   // --- 共通パーツ ---
