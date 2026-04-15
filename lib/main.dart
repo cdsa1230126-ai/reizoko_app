@@ -20,7 +20,7 @@ class ReizokoApp extends StatefulWidget {
 }
 
 class _ReizokoAppState extends State<ReizokoApp> {
-  int _tabIdx = 1; // 起動時に登録画面を表示するように設定
+  int _tabIdx = 1; // 最初は登録画面を表示
   int modeIndex = 0;
   List<dynamic> inventory = [], shoppingList = [];
   Color customColor = const Color(0xFF1B5E20);
@@ -69,7 +69,84 @@ class _ReizokoAppState extends State<ReizokoApp> {
     return "📦";
   }
 
-  // --- 【新機能】食材選択スクロールダイアログ ---
+  // --- 【おもてなし】APIキー設定ダイアログ ---
+  void _showApiKeySetting() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.security, color: Colors.cyanAccent),
+            SizedBox(width: 10),
+            Text("安心・簡単 AI設定", style: TextStyle(color: Colors.white, fontSize: 18)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(10)),
+                child: const Column(
+                  children: [
+                    _InfoRow(Icons.check_circle, "料金はかかりません（無料）"),
+                    SizedBox(height: 8),
+                    _InfoRow(Icons.lock, "キーはあなたの端末内だけで守られます"),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text("🔑 3ステップで完了！", style: TextStyle(color: Colors.yellowAccent, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              _stepTile("1", "下のボタンで発行サイトを開く"),
+              const SizedBox(height: 10),
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text("発行サイト（Google）へ"),
+                ),
+              ),
+              const SizedBox(height: 15),
+              _stepTile("2", "「Create API key」を押してコピー"),
+              _stepTile("3", "下の欄に貼り付けて保存する"),
+              const SizedBox(height: 15),
+              TextField(
+                controller: TextEditingController(text: _apiKey),
+                onChanged: (v) => _apiKey = v.trim(),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.black,
+                  hintText: "ここに貼り付け（ペースト）",
+                  hintStyle: const TextStyle(color: Colors.white24),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("後でやる")),
+          ElevatedButton(
+            onPressed: () { 
+              _save(); 
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("AI設定を保存しました！")));
+              _speak("これで準備万端じゃ！どんなレシピが良いか聞いておくれ。");
+            },
+            child: const Text("設定を保存して完了！"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 【スクロール選択】食材セレクター ---
   void _showFoodSelector() {
     var foodList = foodMaster[_cat] ?? [];
     showModalBottomSheet(
@@ -133,17 +210,11 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
-  // --- 登録タブ (スクロール選択対応) ---
+  // --- 各タブのビルド ---
   Widget _buildReg(Color textColor) {
     return SingleChildScrollView(padding: const EdgeInsets.all(25), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _label("1. カテゴリー", textColor), 
-      _drop(foodMaster.keys.toList(), _cat, (v) {
-        setState(() { 
-          _cat = v!; 
-          _name = foodMaster[v]![0]["name"]; 
-          _date = DateTime.now().add(Duration(days: foodMaster[v]![0]["limit"])); 
-        });
-      }),
+      _drop(foodMaster.keys.toList(), _cat, (v) => setState(() { _cat = v!; _name = foodMaster[v]![0]["name"]; _date = DateTime.now().add(Duration(days: foodMaster[v]![0]["limit"])); })),
       const SizedBox(height: 20),
       _label("2. 食材 (タップして選択)", textColor),
       InkWell(
@@ -172,9 +243,8 @@ class _ReizokoAppState extends State<ReizokoApp> {
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_label("5. 個数", textColor), Row(children: [Text("★ お気に入り", style: TextStyle(color: textColor, fontSize: 12)), Switch(value: _isFav, activeColor: Colors.yellowAccent, onChanged: (v) => setState(() => _isFav = v))])]),
       Row(children: [
         Expanded(child: _drop(List.generate(20, (i) => (i+1).toString()), _count.toInt().toString(), (v) => setState(() => _count = double.parse(v!)))),
-        const SizedBox(width: 10),
-        _circleBtn(Icons.remove, () => setState(() { if(_count > 1) _count--; })),
-        _circleBtn(Icons.add, () => setState(() => _count++)),
+        IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.white70), onPressed: () => setState(() { if(_count > 1) _count--; })),
+        IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.white70), onPressed: () => setState(() => _count++)),
       ]),
       if (_cat == "飲み物") ...[const SizedBox(height: 20), _label("🥤 容量設定", textColor), Row(children: [Expanded(child: TextField(keyboardType: TextInputType.number, style: TextStyle(color: textColor), decoration: const InputDecoration(filled: true, fillColor: Colors.black26, hintText: "500"), onChanged: (v) => _vol = double.tryParse(v) ?? 500)), const SizedBox(width: 10), Expanded(child: _drop(["ml", "L"], _vUnit, (v) => setState(() => _vUnit = v!)))])],
       const SizedBox(height: 35),
@@ -197,7 +267,6 @@ class _ReizokoAppState extends State<ReizokoApp> {
     ]));
   }
 
-  // --- その他のタブとUIパーツ (共通) ---
   Widget _buildInv(Color textColor) {
     if (inventory.isEmpty) return Center(child: Text(chars[modeIndex]["m"], style: TextStyle(color: textColor)));
     return ListView.builder(
@@ -265,24 +334,9 @@ class _ReizokoAppState extends State<ReizokoApp> {
     return Center(child: Text("${chars[modeIndex]["n"]}がレシピを考え中じゃ...", textAlign: TextAlign.center, style: TextStyle(color: textColor, fontSize: 18)));
   }
 
+  // --- 共通パーツ ---
   Widget _label(String t, Color c) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(t, style: TextStyle(color: c, fontWeight: FontWeight.bold, fontSize: 14)));
   Widget _drop(List<String> items, String val, ValueChanged<String?> onC) => Container(padding: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)), child: DropdownButton<String>(value: val, items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: onC, isExpanded: true, underline: const SizedBox(), dropdownColor: Colors.black87, style: const TextStyle(color: Colors.white)));
-  Widget _circleBtn(IconData i, VoidCallback o) => IconButton(icon: Icon(i, color: Colors.white70), onPressed: o);
-
-  void _showApiKeySetting() {
-    TextEditingController _apiController = TextEditingController(text: _apiKey);
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      backgroundColor: Colors.grey[900], title: const Text("🤖 レシピAIの設定", style: TextStyle(color: Colors.white)),
-      content: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text("APIキーを取得して貼り付けてください。", style: TextStyle(color: Colors.white70, fontSize: 13)),
-        const SizedBox(height: 15),
-        Center(child: ElevatedButton(onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']), child: const Text("APIキー取得サイトを開く"))),
-        const SizedBox(height: 15),
-        TextField(controller: _apiController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "キーをペースト", filled: true, fillColor: Colors.black38)),
-      ])),
-      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("閉じる")), ElevatedButton(onPressed: () { setState(() => _apiKey = _apiController.text.trim()); _save(); Navigator.pop(ctx); }, child: const Text("保存"))],
-    ));
-  }
 
   void _showSettings() {
     final colors = [Colors.black, const Color(0xFF263238), const Color(0xFF3E2723), const Color(0xFF1A237E), const Color(0xFF004D40), const Color(0xFF311B92), const Color(0xFF1B5E20), const Color(0xFF0D47A1), const Color(0xFF827717), const Color(0xFFBF360C), const Color(0xFF4E342E), const Color(0xFF424242), const Color(0xFFFFCDD2), const Color(0xFFF8BBD0), const Color(0xFFE1BEE7), const Color(0xFFD1C4E9), const Color(0xFFC5CAE9), const Color(0xFFB3E5FC), const Color(0xFFB2DFDB), const Color(0xFFDCEDC8), const Color(0xFFFFF9C4), const Color(0xFFFFECB3), const Color(0xFFFFE0B2), const Color(0xFFFFCCBC)];
@@ -300,4 +354,20 @@ class _ReizokoAppState extends State<ReizokoApp> {
       ])),
     ));
   }
+}
+
+// --- おもてなしダイアログ用のパーツ ---
+Widget _stepTile(String num, String text) => Row(
+  children: [
+    CircleAvatar(radius: 12, backgroundColor: Colors.yellowAccent, child: Text(num, style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold))),
+    const SizedBox(width: 10),
+    Expanded(child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 13))),
+  ],
+);
+
+class _InfoRow extends StatelessWidget {
+  final IconData icon; final String text;
+  const _InfoRow(this.icon, this.text);
+  @override
+  Widget build(BuildContext context) => Row(children: [Icon(icon, color: Colors.cyanAccent, size: 16), const SizedBox(width: 8), Text(text, style: const TextStyle(color: Colors.white70, fontSize: 12))]);
 }
