@@ -20,14 +20,15 @@ class ReizokoApp extends StatefulWidget {
 }
 
 class _ReizokoAppState extends State<ReizokoApp> {
-  int _tabIdx = 0, modeIndex = 0;
+  int _tabIdx = 1; // 起動時に登録画面を表示するように設定
+  int modeIndex = 0;
   List<dynamic> inventory = [], shoppingList = [];
   Color customColor = const Color(0xFF1B5E20);
-  String _apiKey = ""; // 保存するAPIキー
+  String _apiKey = "";
 
-  // 登録用
+  // 登録用ステート
   String _cat = "肉類", _name = "鶏むね肉", _unit = "個", _vUnit = "ml";
-  DateTime _date = DateTime.now().add(const Duration(days: 3));
+  DateTime _date = DateTime.now().add(const Duration(days: 2));
   double _count = 1.0, _vol = 500.0;
   bool _isFav = false;
 
@@ -61,11 +62,48 @@ class _ReizokoAppState extends State<ReizokoApp> {
     });
   }
 
-  // --- ヘルパー関数 ---
   void _speak(String t) => js.context.callMethod('eval', ["window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance('$t'); u.lang = 'ja-JP'; window.speechSynthesis.speak(u);"]);
+
   String _getIcon(String n) {
     for (var c in foodMaster.values) { for (var i in c) { if (i["name"] == n) return i["icon"]; } }
     return "📦";
+  }
+
+  // --- 【新機能】食材選択スクロールダイアログ ---
+  void _showFoodSelector() {
+    var foodList = foodMaster[_cat] ?? [];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text("$_cat を選んでください", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: foodList.length,
+              itemBuilder: (context, index) {
+                final f = foodList[index];
+                return ListTile(
+                  leading: Text(f["icon"], style: const TextStyle(fontSize: 24)),
+                  title: Text(f["name"], style: const TextStyle(color: Colors.white)),
+                  onTap: () {
+                    setState(() {
+                      _name = f["name"];
+                      _date = DateTime.now().add(Duration(days: f["limit"]));
+                    });
+                    Navigator.pop(ctx);
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -77,7 +115,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
         title: Text("${chars[modeIndex]["i"]} ${chars[modeIndex]["n"]}の冷蔵庫", style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.black38,
         actions: [
-          IconButton(icon: const Icon(Icons.vpn_key, color: Colors.amber), onPressed: _showApiKeySetting), // APIキー設定ボタン
+          IconButton(icon: const Icon(Icons.vpn_key, color: Colors.amber), onPressed: _showApiKeySetting),
           IconButton(icon: Icon(Icons.palette, color: textColor), onPressed: _showSettings),
         ],
       ),
@@ -95,91 +133,71 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
-  // --- APIキー設定用ダイアログ (初心者案内付き) ---
-  void _showApiKeySetting() {
-    TextEditingController _apiController = TextEditingController(text: _apiKey);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text("🤖 レシピAIの設定", style: TextStyle(color: Colors.white, fontSize: 18)),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  // --- 登録タブ (スクロール選択対応) ---
+  Widget _buildReg(Color textColor) {
+    return SingleChildScrollView(padding: const EdgeInsets.all(25), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _label("1. カテゴリー", textColor), 
+      _drop(foodMaster.keys.toList(), _cat, (v) {
+        setState(() { 
+          _cat = v!; 
+          _name = foodMaster[v]![0]["name"]; 
+          _date = DateTime.now().add(Duration(days: foodMaster[v]![0]["limit"])); 
+        });
+      }),
+      const SizedBox(height: 20),
+      _label("2. 食材 (タップして選択)", textColor),
+      InkWell(
+        onTap: _showFoodSelector,
+        child: Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white24)),
+          child: Row(
             children: [
-              const Text("AIレシピ機能を使うには「APIキー」が必要です（無料で取得できます）。", style: TextStyle(color: Colors.white70, fontSize: 13)),
-              const SizedBox(height: 15),
-              _guideStep("1", "下のボタンから取得サイトを開く"),
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']),
-                  icon: const Icon(Icons.open_in_new, size: 16),
-                  label: const Text("APIキーを取得する"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _guideStep("2", "「Create API key」を押してコピー"),
-              _guideStep("3", "下の欄に貼り付けて保存"),
-              const SizedBox(height: 15),
-              TextField(
-                controller: _apiController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: "AIキーをここにペースト",
-                  hintStyle: const TextStyle(color: Colors.white24),
-                  filled: true,
-                  fillColor: Colors.black38,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
+              Text(_getIcon(_name), style: const TextStyle(fontSize: 24)),
+              const SizedBox(width: 15),
+              Text(_name, style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              const Icon(Icons.arrow_drop_down, color: Colors.white70),
             ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("キャンセル")),
-          ElevatedButton(
-            onPressed: () {
-              setState(() => _apiKey = _apiController.text.trim());
-              _save();
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("AIキーを保存しました！")));
-            },
-            child: const Text("保存する"),
-          ),
-        ],
       ),
-    );
+      const SizedBox(height: 20),
+      Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [_label("3. 単位", textColor), _drop(units, _unit, (v) => setState(() => _unit = v!))])),
+        const SizedBox(width: 15),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [_label("4. 期限", textColor), InkWell(onTap: () async { var p = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime.now().subtract(const Duration(days: 30)), lastDate: DateTime.now().add(const Duration(days: 730))); if (p != null) setState(() => _date = p); }, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(10)), child: Text("${_date.year}/${_date.month}/${_date.day}", style: TextStyle(color: textColor))))])),
+      ]),
+      const SizedBox(height: 20),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_label("5. 個数", textColor), Row(children: [Text("★ お気に入り", style: TextStyle(color: textColor, fontSize: 12)), Switch(value: _isFav, activeColor: Colors.yellowAccent, onChanged: (v) => setState(() => _isFav = v))])]),
+      Row(children: [
+        Expanded(child: _drop(List.generate(20, (i) => (i+1).toString()), _count.toInt().toString(), (v) => setState(() => _count = double.parse(v!)))),
+        const SizedBox(width: 10),
+        _circleBtn(Icons.remove, () => setState(() { if(_count > 1) _count--; })),
+        _circleBtn(Icons.add, () => setState(() => _count++)),
+      ]),
+      if (_cat == "飲み物") ...[const SizedBox(height: 20), _label("🥤 容量設定", textColor), Row(children: [Expanded(child: TextField(keyboardType: TextInputType.number, style: TextStyle(color: textColor), decoration: const InputDecoration(filled: true, fillColor: Colors.black26, hintText: "500"), onChanged: (v) => _vol = double.tryParse(v) ?? 500)), const SizedBox(width: 10), Expanded(child: _drop(["ml", "L"], _vUnit, (v) => setState(() => _vUnit = v!)))])],
+      const SizedBox(height: 35),
+      ElevatedButton(
+        style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 60), backgroundColor: Colors.yellowAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+        onPressed: () {
+          double step = (_name.contains("米") || _unit == "kg" || _unit == "合") ? 0.15 : 1.0;
+          setState(() {
+            inventory.add({
+              "name": _name, "icon": _getIcon(_name), "expiry": _date.toIso8601String(),
+              "count": _count, "unit": _unit, "step": step, "isFavorite": _isFav,
+              "vol": _cat == "飲み物" ? _vol : null, "vUnit": _cat == "飲み物" ? _vUnit : null,
+            });
+            _tabIdx = 0;
+          });
+          _speak("${chars[modeIndex]["m"]} $_nameを入れたぞ。"); _save();
+        },
+        child: const Text("冷蔵庫に保管する", style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
+    ]));
   }
 
-  Widget _guideStep(String num, String text) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(children: [
-      CircleAvatar(radius: 10, backgroundColor: Colors.yellowAccent, child: Text(num, style: const TextStyle(fontSize: 10, color: Colors.black))),
-      const SizedBox(width: 8),
-      Expanded(child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 13))),
-    ]),
-  );
-
-  // --- レシピ提案タブ (AI未設定時の案内) ---
-  Widget _buildRec(Color textColor) {
-    if (_apiKey.isEmpty) {
-      return Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.auto_awesome, color: Colors.yellowAccent, size: 64),
-          const SizedBox(height: 16),
-          Text("AIレシピ機能が未設定です", style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text("APIキーを設定すると、冷蔵庫の中身から\n長老たちがレシピを提案してくれます！", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
-          const SizedBox(height: 24),
-          ElevatedButton(onPressed: _showApiKeySetting, child: const Text("APIキーを設定する")),
-        ]),
-      );
-    }
-    return Center(child: Text("${chars[modeIndex]["n"]}がレシピを考え中じゃ...\n(ここにGeminiの返信を表示します)", textAlign: TextAlign.center, style: TextStyle(color: textColor, fontSize: 18)));
-  }
-
-  // --- 既存の在庫・登録・買い物タブ ---
+  // --- その他のタブとUIパーツ (共通) ---
   Widget _buildInv(Color textColor) {
     if (inventory.isEmpty) return Center(child: Text(chars[modeIndex]["m"], style: TextStyle(color: textColor)));
     return ListView.builder(
@@ -210,41 +228,6 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
-  Widget _buildReg(Color textColor) {
-    var foodList = (foodMaster[_cat] ?? []).map((e) => e["name"] as String).toList();
-    return SingleChildScrollView(padding: const EdgeInsets.all(25), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _label("1. カテゴリー", textColor), _drop(foodMaster.keys.toList(), _cat, (v) => setState(() { _cat = v!; _name = foodMaster[v]![0]["name"]; _date = DateTime.now().add(Duration(days: foodMaster[v]![0]["limit"])); })),
-      const SizedBox(height: 15), _label("2. 食材", textColor), _drop(foodList, _name, (v) => setState(() { _name = v!; _date = DateTime.now().add(Duration(days: foodMaster[_cat]!.firstWhere((e) => e["name"] == v)["limit"])); })),
-      const SizedBox(height: 15),
-      Row(children: [
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [_label("3. 単位", textColor), _drop(units, _unit, (v) => setState(() => _unit = v!))])),
-        const SizedBox(width: 15),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [_label("4. 期限", textColor), InkWell(onTap: () async { var p = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 730))); if (p != null) setState(() => _date = p); }, child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(10)), child: Text("${_date.year}/${_date.month}/${_date.day}", style: TextStyle(color: textColor))))])),
-      ]),
-      const SizedBox(height: 15),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_label("5. 個数", textColor), Row(children: [Text("★ お気に入り", style: TextStyle(color: textColor, fontSize: 12)), Switch(value: _isFav, activeColor: Colors.yellowAccent, onChanged: (v) => setState(() => _isFav = v))])]),
-      Row(children: [
-        Expanded(child: _drop(List.generate(20, (i) => (i+1).toString()), _count.toInt().toString(), (v) => setState(() => _count = double.parse(v!)))),
-        IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.white70), onPressed: () => setState(() { if(_count > 1) _count--; })),
-        IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.white70), onPressed: () => setState(() => _count++)),
-      ]),
-      if (_cat == "飲み物") ...[const SizedBox(height: 15), _label("🥤 容量設定", textColor), Row(children: [Expanded(child: TextField(keyboardType: TextInputType.number, style: TextStyle(color: textColor), decoration: const InputDecoration(filled: true, fillColor: Colors.black26), onChanged: (v) => _vol = double.tryParse(v) ?? 500)), const SizedBox(width: 10), Expanded(child: _drop(["ml", "L"], _vUnit, (v) => setState(() => _vUnit = v!)))])],
-      const SizedBox(height: 30),
-      ElevatedButton(style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 55), backgroundColor: Colors.yellowAccent), onPressed: () {
-        double step = (_name.contains("米") || _unit == "kg" || _unit == "合") ? 0.15 : 1.0;
-        setState(() {
-          inventory.add({
-            "name": _name, "icon": _getIcon(_name), "expiry": _date.toIso8601String(),
-            "count": _count, "unit": _unit, "step": step, "isFavorite": _isFav,
-            "vol": _cat == "飲み物" ? _vol : null, "vUnit": _cat == "飲み物" ? _vUnit : null,
-          });
-          _tabIdx = 0;
-        });
-        _speak("${chars[modeIndex]["m"]} $_nameを入れたぞ。"); _save();
-      }, child: const Text("冷蔵庫に保管する", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold))),
-    ]));
-  }
-
   Widget _buildShop(Color textColor) {
     if (shoppingList.isEmpty) return Center(child: Text("買い物リストは空じゃ。", style: TextStyle(color: textColor)));
     shoppingList.sort((a, b) => ((a["isFavorite"] ?? false) ? 0 : 1).compareTo((b["isFavorite"] ?? false) ? 0 : 1));
@@ -267,8 +250,39 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
-  Widget _label(String t, Color c) => Padding(padding: const EdgeInsets.only(bottom: 5), child: Text(t, style: TextStyle(color: c, fontWeight: FontWeight.bold, fontSize: 13)));
+  Widget _buildRec(Color textColor) {
+    if (_apiKey.isEmpty) {
+      return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.auto_awesome, color: Colors.yellowAccent, size: 64),
+          const SizedBox(height: 16),
+          const Text("AIレシピ機能が未設定です", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 24),
+          ElevatedButton(onPressed: _showApiKeySetting, child: const Text("APIキーを設定する")),
+        ]),
+      );
+    }
+    return Center(child: Text("${chars[modeIndex]["n"]}がレシピを考え中じゃ...", textAlign: TextAlign.center, style: TextStyle(color: textColor, fontSize: 18)));
+  }
+
+  Widget _label(String t, Color c) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(t, style: TextStyle(color: c, fontWeight: FontWeight.bold, fontSize: 14)));
   Widget _drop(List<String> items, String val, ValueChanged<String?> onC) => Container(padding: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)), child: DropdownButton<String>(value: val, items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: onC, isExpanded: true, underline: const SizedBox(), dropdownColor: Colors.black87, style: const TextStyle(color: Colors.white)));
+  Widget _circleBtn(IconData i, VoidCallback o) => IconButton(icon: Icon(i, color: Colors.white70), onPressed: o);
+
+  void _showApiKeySetting() {
+    TextEditingController _apiController = TextEditingController(text: _apiKey);
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      backgroundColor: Colors.grey[900], title: const Text("🤖 レシピAIの設定", style: TextStyle(color: Colors.white)),
+      content: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text("APIキーを取得して貼り付けてください。", style: TextStyle(color: Colors.white70, fontSize: 13)),
+        const SizedBox(height: 15),
+        Center(child: ElevatedButton(onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']), child: const Text("APIキー取得サイトを開く"))),
+        const SizedBox(height: 15),
+        TextField(controller: _apiController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "キーをペースト", filled: true, fillColor: Colors.black38)),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("閉じる")), ElevatedButton(onPressed: () { setState(() => _apiKey = _apiController.text.trim()); _save(); Navigator.pop(ctx); }, child: const Text("保存"))],
+    ));
+  }
 
   void _showSettings() {
     final colors = [Colors.black, const Color(0xFF263238), const Color(0xFF3E2723), const Color(0xFF1A237E), const Color(0xFF004D40), const Color(0xFF311B92), const Color(0xFF1B5E20), const Color(0xFF0D47A1), const Color(0xFF827717), const Color(0xFFBF360C), const Color(0xFF4E342E), const Color(0xFF424242), const Color(0xFFFFCDD2), const Color(0xFFF8BBD0), const Color(0xFFE1BEE7), const Color(0xFFD1C4E9), const Color(0xFFC5CAE9), const Color(0xFFB3E5FC), const Color(0xFFB2DFDB), const Color(0xFFDCEDC8), const Color(0xFFFFF9C4), const Color(0xFFFFECB3), const Color(0xFFFFE0B2), const Color(0xFFFFCCBC)];
