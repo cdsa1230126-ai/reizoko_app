@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:js' as js;
+import 'dart:html' as html;
 import 'food_data.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -38,6 +39,10 @@ class _ReizokoAppState extends State<ReizokoApp> {
   double _count = 1.0;
   bool _isFav = false;
   final List<String> units = ["個", "g", "kg", "ml", "L", "本", "枚", "パック", "合", "玉", "袋"];
+
+  // レシート読み込み用
+  bool _isReceiptLoading = false;
+  List<Map<String, dynamic>> _receiptItems = [];
 
   final List<Map<String, dynamic>> chars = [
     {"n": "長老", "i": "🧓", "m": "フォッフォッフォ、良い食材じゃ。", "s": "～じゃ"},
@@ -397,6 +402,105 @@ class _ReizokoAppState extends State<ReizokoApp> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── レシート読み込みセクション ──
+        Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: Colors.black38,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.amber.withOpacity(0.5)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.receipt_long, color: Colors.amber, size: 20),
+              const SizedBox(width: 8),
+              const Text("レシートから一括登録",
+                style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 14)),
+            ]),
+            const SizedBox(height: 4),
+            const Text("レシートの写真をアップロードするとAIが食材を読み取ります",
+              style: TextStyle(color: Colors.white38, fontSize: 11)),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isReceiptLoading ? null : _pickReceiptImage,
+                icon: _isReceiptLoading
+                    ? const SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                    : const Icon(Icons.upload_file),
+                label: Text(_isReceiptLoading ? "読み取り中..." : "レシート画像を選択"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black,
+                  minimumSize: const Size(0, 50),
+                ),
+              ),
+            ),
+            // 読み取り結果プレビュー
+            if (_receiptItems.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Divider(color: Colors.white24),
+              const SizedBox(height: 8),
+              Text("${_receiptItems.length}品を読み取りました。確認して登録してください。",
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              const SizedBox(height: 8),
+              ..._receiptItems.asMap().entries.map((e) {
+                final idx = e.key;
+                final item = e.value;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(children: [
+                    Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 22)),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(item["name"], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      Text("${item["unit"]} / ${item["loc"]} / 期限${item["limit"]}日",
+                        style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                    ])),
+                    // 個別削除ボタン
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white38, size: 18),
+                      onPressed: () => setState(() => _receiptItems.removeAt(idx)),
+                    ),
+                  ]),
+                );
+              }),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: ElevatedButton.icon(
+                  onPressed: _addAllReceiptItems,
+                  icon: const Icon(Icons.kitchen),
+                  label: Text("全て在庫へ登録 (${_receiptItems.length}品)"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7FFFD4),
+                    foregroundColor: Colors.black,
+                    minimumSize: const Size(0, 50),
+                  ),
+                )),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () => setState(() => _receiptItems.clear()),
+                  icon: const Icon(Icons.delete_sweep, color: Colors.white38),
+                  tooltip: "リストをクリア",
+                ),
+              ]),
+            ],
+          ]),
+        ),
+
+        const SizedBox(height: 20),
+        const Divider(color: Colors.white24),
+        const SizedBox(height: 10),
+        const Text("── または手動で登録 ──",
+          style: TextStyle(color: Colors.white38, fontSize: 12)),
+        const SizedBox(height: 15),
         _label("1. カテゴリー"),
         _dropdown(foodMaster.keys.toList(), _cat, (v) => setState(() {
           _cat = v!;
@@ -490,7 +594,6 @@ class _ReizokoAppState extends State<ReizokoApp> {
       "isFav": _isFav,
       "loc": _loc,
     };
-    // FIX: setState 完了後に _save() を呼ぶ
     setState(() {
       if (toInv) inventory.add(data);
       else shoppingList.add(data);
@@ -498,6 +601,126 @@ class _ReizokoAppState extends State<ReizokoApp> {
     });
     _speak("${_escapeSpeech(_name)}を追加したぞ。");
     _save();
+  }
+
+  // --- レシート読み込み ---
+  void _pickReceiptImage() {
+    if (_apiKey.isEmpty) { _promptApiKey(); return; }
+    final input = html.FileUploadInputElement()
+      ..accept = 'image/*'
+      ..click();
+    input.onChange.listen((e) {
+      final file = input.files?.first;
+      if (file == null) return;
+      final reader = html.FileReader();
+      reader.readAsDataUrl(file);
+      reader.onLoad.listen((_) {
+        final dataUrl = reader.result as String;
+        final base64 = dataUrl.split(',').last;
+        final mimeType = dataUrl.split(';').first.split(':').last;
+        setState(() {
+          _isReceiptLoading = true;
+          _receiptItems.clear();
+        });
+        _analyzeReceipt(base64, mimeType);
+      });
+    });
+  }
+
+  Future<void> _analyzeReceipt(String base64, String mimeType) async {
+    try {
+      final prompt = """
+このレシートまたは食材の画像を解析して、食材・食品のみを抽出してください。
+日用品・消耗品（洗剤、ティッシュ等）は除外してください。
+
+以下のJSON形式のみで返答してください。余分なテキストや```は不要です。
+[
+  {"name":"食材名","unit":"個","loc":"冷蔵","limit":3},
+  ...
+]
+
+unitは ["個","g","kg","ml","L","本","枚","パック","合","玉","袋"] から最適なものを選択。
+locは ["冷蔵","冷凍","野菜室","常温"] から最適なものを選択。
+limitは消費期限の目安日数（整数）。
+食材名は短く簡潔に（例：「国産鶏むね肉」→「鶏むね肉」）。
+""";
+
+      final res = await http.post(
+        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "contents": [{
+            "parts": [
+              {
+                "inline_data": {
+                  "mime_type": mimeType,
+                  "data": base64,
+                }
+              },
+              {"text": prompt}
+            ]
+          }]
+        }),
+      ).timeout(const Duration(seconds: 40));
+
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        String text = decoded['candidates'][0]['content']['parts'][0]['text'];
+        // JSON部分だけ抽出（```json ... ``` が返ってきた場合も対応）
+        final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(text);
+        if (jsonMatch != null) {
+          final List<dynamic> items = jsonDecode(jsonMatch.group(0)!);
+          setState(() {
+            _receiptItems = items.map((item) {
+              final name = item["name"] as String;
+              final limit = (item["limit"] as num?)?.toInt() ?? 3;
+              return {
+                "name": name,
+                "icon": _getIcon(name),
+                "unit": item["unit"] ?? "個",
+                "loc": item["loc"] ?? "冷蔵",
+                "limit": limit,
+                "count": 1.0,
+                "isFav": false,
+                "expiry": DateTime.now().add(Duration(days: limit)).toIso8601String(),
+              };
+            }).toList();
+          });
+          _speak("レシートから${_receiptItems.length}品読み取った${chars[modeIndex]['s']}。");
+        } else {
+          _showSnack("食材を読み取れなかった${chars[modeIndex]['s']}。別の画像を試してくれ。");
+        }
+      } else if (res.statusCode == 400) {
+        _showSnack("APIキーが無効${chars[modeIndex]['s']}。設定を確認してくれ。");
+      } else {
+        _showSnack("エラーが発生した（コード: ${res.statusCode}）${chars[modeIndex]['s']}。");
+      }
+    } on TimeoutException {
+      _showSnack("タイムアウトじゃ。もう一度試してくれ。");
+    } catch (e) {
+      _showSnack("予期せぬエラーじゃ: $e");
+    }
+    setState(() => _isReceiptLoading = false);
+  }
+
+  void _addAllReceiptItems() {
+    if (_receiptItems.isEmpty) return;
+    setState(() {
+      for (final item in _receiptItems) {
+        inventory.add({...item});
+      }
+      _sortInventory();
+      _receiptItems.clear();
+    });
+    _speak("${inventory.length}品を在庫に追加した${chars[modeIndex]['s']}。");
+    _save();
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.grey[800]),
+    );
   }
 
   // --- AIタブ ---
@@ -545,13 +768,14 @@ class _ReizokoAppState extends State<ReizokoApp> {
   ]);
 
   void _saveRecipe() {
+    final title = "$_aiMoodのレシピ";
     setState(() => favoriteRecipes.add({
-      "title": "$_aiMoodのレシピ",
+      "title": title,
       "body": _aiResult,
       "date": DateFormat('MM/dd').format(DateTime.now()),
     }));
     _save();
-    _speak("レシピを保存したぞ。設定から見れるぞい。");
+    _speak("レシピを保存した${chars[modeIndex]['s']}。設定から見れるぞい。");
   }
 
   // --- 設定画面 ---
