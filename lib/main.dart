@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'dart:async';
 import 'dart:js' as js;
 import 'food_data.dart';
 import 'package:http/http.dart' as http;
@@ -29,6 +30,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
   String _aiMood = "🥗 ヘルシー";
   String _aiResult = "";
   bool _isAiLoading = false;
+  DateTime? _lastRequestTime; // クールダウン管理用
   final List<String> moods = ["🥗 ヘルシー", "🍖 ガッツリ", "⏱️ 時短"];
 
   String _cat = "肉類", _name = "鶏むね肉", _unit = "個", _loc = "冷蔵";
@@ -658,27 +660,39 @@ class _ReizokoAppState extends State<ReizokoApp> {
 
   Future<void> _generateRecipe() async {
     if (_apiKey.isEmpty) { _promptApiKey(); return; }
+
+    // クールダウン: 前回リクエストから10秒以内は送信しない
+    final now = DateTime.now();
+    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 10) {
+      setState(() => _aiResult = "少し待ってからもう一度試してくれ${chars[modeIndex]['s']}。");
+      return;
+    }
+    _lastRequestTime = now;
+
     setState(() { _isAiLoading = true; _aiResult = ""; });
     try {
       final res = await http.post(
-       Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
+        // FIX: モデル名を gemini-2.0-flash に更新
+        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({"contents": [{"parts": [{"text":
           "あなたは${chars[modeIndex]["n"]}です。語尾は${chars[modeIndex]["s"]}を使って。"
           "${inventory.map((e) => e['name']).join(',')}で${_aiMood}なレシピを作って。"
         }]}]}),
-      );
-      // FIX: ステータスコードで分岐し詳細なエラーメッセージを表示
+      ).timeout(const Duration(seconds: 30)); // タイムアウト30秒
+
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         setState(() => _aiResult = decoded['candidates'][0]['content']['parts'][0]['text']);
       } else if (res.statusCode == 400) {
-        setState(() => _aiResult = "APIキーが無効じゃ。設定を確認してくれ。");
+        setState(() => _aiResult = "APIキーが無効${chars[modeIndex]['s']}。設定を確認してくれ。");
       } else if (res.statusCode == 429) {
-        setState(() => _aiResult = "リクエストが多すぎる。少し待ってから試してくれ。");
+        setState(() => _aiResult = "リクエストが多すぎる${chars[modeIndex]['s']}。1分ほど待ってから試してくれ。");
       } else {
-        setState(() => _aiResult = "エラーが発生した（コード: ${res.statusCode}）。しばらく待って試してくれ。");
+        setState(() => _aiResult = "エラーが発生した（コード: ${res.statusCode}）${chars[modeIndex]['s']}。しばらく待って試してくれ。");
       }
+    } on TimeoutException {
+      setState(() => _aiResult = "タイムアウトじゃ。通信環境を確認してもう一度試してくれ。");
     } on http.ClientException {
       setState(() => _aiResult = "ネットワークに接続できないぞ。通信環境を確認してくれ。");
     } catch (e) {
