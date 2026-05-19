@@ -628,6 +628,15 @@ class _ReizokoAppState extends State<ReizokoApp> {
   }
 
   Future<void> _analyzeReceipt(String base64, String mimeType) async {
+    // クールダウン: レシピ提案と共通の制限（10秒）
+    final now = DateTime.now();
+    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 10) {
+      setState(() => _isReceiptLoading = false);
+      _showSnack("少し待ってからもう一度試してくれ${chars[modeIndex]['s']}。");
+      return;
+    }
+    _lastRequestTime = now;
+
     try {
       final prompt = """
 このレシートまたは食材の画像を解析して、食材・食品のみを抽出してください。
@@ -666,7 +675,6 @@ limitは消費期限の目安日数（整数）。
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         String text = decoded['candidates'][0]['content']['parts'][0]['text'];
-        // JSON部分だけ抽出（```json ... ``` が返ってきた場合も対応）
         final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(text);
         if (jsonMatch != null) {
           final List<dynamic> items = jsonDecode(jsonMatch.group(0)!);
@@ -692,6 +700,8 @@ limitは消費期限の目安日数（整数）。
         }
       } else if (res.statusCode == 400) {
         _showSnack("APIキーが無効${chars[modeIndex]['s']}。設定を確認してくれ。");
+      } else if (res.statusCode == 429) {
+        _showSnack("リクエストが多すぎる${chars[modeIndex]['s']}。1分ほど待ってから試してくれ。");
       } else {
         _showSnack("エラーが発生した（コード: ${res.statusCode}）${chars[modeIndex]['s']}。");
       }
