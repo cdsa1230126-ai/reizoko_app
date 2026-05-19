@@ -88609,7 +88609,7 @@ s=p}for(;;)switch(s){case 0:if(n.y.length===0){n.EA()
 s=1
 break}n.Z(new A.apm(n))
 p=4
-k=A.is("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key="+n.y)
+k=A.is("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+n.y)
 j=t.N
 i=A.f(["Content-Type","application/json"],j,j)
 h=n.fr

@@ -661,7 +661,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
     setState(() { _isAiLoading = true; _aiResult = ""; });
     try {
       final res = await http.post(
-        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=$_apiKey"),
+       Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({"contents": [{"parts": [{"text":
           "あなたは${chars[modeIndex]["n"]}です。語尾は${chars[modeIndex]["s"]}を使って。"
