@@ -652,9 +652,9 @@ class _ReizokoAppState extends State<ReizokoApp> {
   }
 
   Future<void> _analyzeReceipt(String base64, String mimeType) async {
-    // クールダウン: 10秒以内の連続リクエストをブロック
+    // クールダウン: RPM5制限に合わせて15秒
     final now = DateTime.now();
-    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 10) {
+    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 15) {
       setState(() => _isReceiptLoading = false);
       _showSnack("少し待ってからもう一度試してくれ${chars[modeIndex]['s']}。");
       return;
@@ -691,7 +691,7 @@ limitは消費期限の目安日数（整数）。
 """;
 
         final res = await http.post(
-          Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
+          Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$_apiKey"),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
             "contents": [{
@@ -963,9 +963,9 @@ limitは消費期限の目安日数（整数）。
   Future<void> _generateRecipe() async {
     if (_apiKey.isEmpty) { _promptApiKey(); return; }
 
-    // クールダウン: 前回リクエストから10秒以内は送信しない
+    // クールダウン: RPM5制限に合わせて15秒
     final now = DateTime.now();
-    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 10) {
+    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 15) {
       setState(() => _aiResult = "少し待ってからもう一度試してくれ${chars[modeIndex]['s']}。");
       return;
     }
@@ -974,14 +974,13 @@ limitは消費期限の目安日数（整数）。
     setState(() { _isAiLoading = true; _aiResult = ""; });
     try {
       final res = await http.post(
-        // FIX: モデル名を gemini-2.0-flash に更新
-        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
+        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$_apiKey"),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({"contents": [{"parts": [{"text":
           "あなたは${chars[modeIndex]["n"]}です。語尾は${chars[modeIndex]["s"]}を使って。"
           "${inventory.map((e) => e['name']).join(',')}で${_aiMood}なレシピを作って。"
         }]}]}),
-      ).timeout(const Duration(seconds: 30)); // タイムアウト30秒
+      ).timeout(const Duration(seconds: 30));
 
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
