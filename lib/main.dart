@@ -44,6 +44,9 @@ class _ReizokoAppState extends State<ReizokoApp> {
   bool _isReceiptLoading = false;
   List<Map<String, dynamic>> _receiptItems = [];
 
+  // リトライバナー用
+  String _retryBannerMsg = ""; // 空文字のときはバナー非表示
+
   final List<Map<String, dynamic>> chars = [
     {"n": "長老", "i": "🧓", "m": "フォッフォッフォ、良い食材じゃ。", "s": "～じゃ"},
     {"n": "博士", "i": "🧑‍⚕️", "m": "フム、実に興味深いデータだ。", "s": "～である"},
@@ -233,12 +236,33 @@ class _ReizokoAppState extends State<ReizokoApp> {
           ),
         ],
       ),
-      body: [
-        _buildListTab(inventory, true, tc),
-        _buildRegistration(tc),
-        _buildListTab(shoppingList, false, tc),
-        _buildAiTab(tc),
-      ][_tabIdx],
+      body: Column(children: [
+        // リトライバナー（解析中・待機中のみ全タブで表示）
+        if (_retryBannerMsg.isNotEmpty)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: double.infinity,
+            color: Colors.orange.shade800,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            child: Row(children: [
+              const SizedBox(
+                width: 14, height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                _retryBannerMsg,
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+              )),
+            ]),
+          ),
+        Expanded(child: [
+          _buildListTab(inventory, true, tc),
+          _buildRegistration(tc),
+          _buildListTab(shoppingList, false, tc),
+          _buildAiTab(tc),
+        ][_tabIdx]),
+      ]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabIdx,
         onTap: (i) => setState(() => _tabIdx = i),
@@ -628,7 +652,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
   }
 
   Future<void> _analyzeReceipt(String base64, String mimeType) async {
-    // クールダウン: レシピ提案と共通の制限（10秒）
+    // クールダウン: 10秒以内の連続リクエストをブロック
     final now = DateTime.now();
     if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 10) {
       setState(() => _isReceiptLoading = false);
@@ -637,8 +661,20 @@ class _ReizokoAppState extends State<ReizokoApp> {
     }
     _lastRequestTime = now;
 
-    try {
-      final prompt = """
+    // リトライ設定: 最大3回、待機時間 30→60→120秒
+    const maxRetry = 3;
+    final waitSecs = [30, 60, 120];
+
+    for (int retry = 0; retry < maxRetry; retry++) {
+      try {
+        // バナー表示
+        setState(() {
+          _retryBannerMsg = retry == 0
+              ? "🔍 レシートを解析中${chars[modeIndex]['s']}..."
+              : "🔄 再試行中 (${retry + 1}/$maxRetry)... しばらく待っておくれ${chars[modeIndex]['s']}。";
+        });
+
+        final prompt = """
 このレシートまたは食材の画像を解析して、食材・食品のみを抽出してください。
 日用品・消耗品（洗剤、ティッシュ等）は除外してください。
 
@@ -654,63 +690,95 @@ limitは消費期限の目安日数（整数）。
 食材名は短く簡潔に（例：「国産鶏むね肉」→「鶏むね肉」）。
 """;
 
-      final res = await http.post(
-        Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "contents": [{
-            "parts": [
-              {
-                "inline_data": {
-                  "mime_type": mimeType,
-                  "data": base64,
-                }
-              },
-              {"text": prompt}
-            ]
-          }]
-        }),
-      ).timeout(const Duration(seconds: 40));
+        final res = await http.post(
+          Uri.parse("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$_apiKey"),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            "contents": [{
+              "parts": [
+                {"inline_data": {"mime_type": mimeType, "data": base64}},
+                {"text": prompt}
+              ]
+            }]
+          }),
+        ).timeout(const Duration(seconds: 40));
 
-      if (res.statusCode == 200) {
-        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
-        String text = decoded['candidates'][0]['content']['parts'][0]['text'];
-        final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(text);
-        if (jsonMatch != null) {
-          final List<dynamic> items = jsonDecode(jsonMatch.group(0)!);
-          setState(() {
-            _receiptItems = items.map((item) {
-              final name = item["name"] as String;
-              final limit = (item["limit"] as num?)?.toInt() ?? 3;
-              return {
-                "name": name,
-                "icon": _getIcon(name),
-                "unit": item["unit"] ?? "個",
-                "loc": item["loc"] ?? "冷蔵",
-                "limit": limit,
-                "count": 1.0,
-                "isFav": false,
-                "expiry": DateTime.now().add(Duration(days: limit)).toIso8601String(),
-              };
-            }).toList();
-          });
-          _speak("レシートから${_receiptItems.length}品読み取った${chars[modeIndex]['s']}。");
+        if (res.statusCode == 200) {
+          // 成功
+          final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+          String text = decoded['candidates'][0]['content']['parts'][0]['text'];
+          final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(text);
+          if (jsonMatch != null) {
+            final List<dynamic> items = jsonDecode(jsonMatch.group(0)!);
+            setState(() {
+              _receiptItems = items.map((item) {
+                final name = item["name"] as String;
+                final limit = (item["limit"] as num?)?.toInt() ?? 3;
+                return {
+                  "name": name,
+                  "icon": _getIcon(name),
+                  "unit": item["unit"] ?? "個",
+                  "loc": item["loc"] ?? "冷蔵",
+                  "limit": limit,
+                  "count": 1.0,
+                  "isFav": false,
+                  "expiry": DateTime.now().add(Duration(days: limit)).toIso8601String(),
+                };
+              }).toList();
+              // 成功したらバナーを消す
+              _retryBannerMsg = "";
+            });
+            _speak("レシートから${_receiptItems.length}品読み取った${chars[modeIndex]['s']}。");
+          } else {
+            setState(() => _retryBannerMsg = "");
+            _showSnack("食材を読み取れなかった${chars[modeIndex]['s']}。別の画像を試してくれ。");
+          }
+          break; // 成功したのでループを抜ける
+
+        } else if (res.statusCode == 429) {
+          // リクエスト過多 → 待機してリトライ
+          if (retry < maxRetry - 1) {
+            final wait = waitSecs[retry];
+            // カウントダウン表示
+            for (int s = wait; s > 0; s--) {
+              setState(() {
+                _retryBannerMsg = "⏳ APIが混雑中${chars[modeIndex]['s']}。${s}秒後に自動で再試行する...";
+              });
+              await Future.delayed(const Duration(seconds: 1));
+            }
+            _lastRequestTime = DateTime.now(); // リトライ時刻を更新
+            continue; // 次のリトライへ
+          } else {
+            // 3回全部失敗
+            setState(() => _retryBannerMsg = "");
+            _showSnack("何度試しても混雑中${chars[modeIndex]['s']}。時間をおいてから試してくれ。");
+          }
+
+        } else if (res.statusCode == 400) {
+          setState(() => _retryBannerMsg = "");
+          _showSnack("APIキーが無効${chars[modeIndex]['s']}。設定を確認してくれ。");
+          break;
         } else {
-          _showSnack("食材を読み取れなかった${chars[modeIndex]['s']}。別の画像を試してくれ。");
+          setState(() => _retryBannerMsg = "");
+          _showSnack("エラーが発生した（コード: ${res.statusCode}）${chars[modeIndex]['s']}。");
+          break;
         }
-      } else if (res.statusCode == 400) {
-        _showSnack("APIキーが無効${chars[modeIndex]['s']}。設定を確認してくれ。");
-      } else if (res.statusCode == 429) {
-        _showSnack("リクエストが多すぎる${chars[modeIndex]['s']}。1分ほど待ってから試してくれ。");
-      } else {
-        _showSnack("エラーが発生した（コード: ${res.statusCode}）${chars[modeIndex]['s']}。");
+
+      } on TimeoutException {
+        setState(() => _retryBannerMsg = "");
+        _showSnack("タイムアウトじゃ。もう一度試してくれ。");
+        break;
+      } catch (e) {
+        setState(() => _retryBannerMsg = "");
+        _showSnack("予期せぬエラーじゃ: $e");
+        break;
       }
-    } on TimeoutException {
-      _showSnack("タイムアウトじゃ。もう一度試してくれ。");
-    } catch (e) {
-      _showSnack("予期せぬエラーじゃ: $e");
     }
-    setState(() => _isReceiptLoading = false);
+
+    setState(() {
+      _isReceiptLoading = false;
+      _retryBannerMsg = "";
+    });
   }
 
   void _addAllReceiptItems() {
