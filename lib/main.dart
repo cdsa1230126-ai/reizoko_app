@@ -53,57 +53,65 @@ class _ReizokoAppState extends State<ReizokoApp> {
     {"n": "商人", "i": "🕶️", "m": "まいど！活きのいいのが入ったね！", "s": "～ですよ！"},
   ];
 
+  // スポットライトチュートリアル用
+  int _tutorialStep = -1; // -1 = 非表示
+  final GlobalKey _keySettings = GlobalKey();
+  final GlobalKey _keyApiSave = GlobalKey();
+
+  bool get _isTutorialActive => _tutorialStep >= 0;
+
   @override
   void initState() {
     super.initState();
     _load().then((_) {
-      if (_apiKey.isEmpty) Future.delayed(Duration.zero, () => _showTutorial());
+      if (_apiKey.isEmpty) {
+        Future.delayed(const Duration(milliseconds: 500), () => _startTutorial());
+      }
     });
   }
 
-  // --- チュートリアル ---
-  void _showTutorial() {
-    int step = 0;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setStep) {
-          final pages = [
-            {"t": "食材の登録", "m": "「登録」タブから冷蔵庫や買い物リストへ追加できます。", "i": Icons.add_circle_outline},
-            {"t": "AIキーの取得", "m": "AIレシピにはキーが必要です。下のボタンから取得ページへ飛べます。", "i": Icons.vpn_key},
-          ];
-          return AlertDialog(
-            backgroundColor: Colors.grey[900],
-            title: Row(children: [
-              Icon(pages[step]["i"] as IconData, color: Colors.amber),
-              const SizedBox(width: 10),
-              Text(pages[step]["t"] as String, style: const TextStyle(color: Colors.white)),
-            ]),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(pages[step]["m"] as String, style: const TextStyle(color: Colors.white70)),
-              if (step == 1) Padding(
-                padding: const EdgeInsets.only(top: 15),
-                child: ElevatedButton(
-                  onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']),
-                  child: const Text("API取得ページを開く"),
-                ),
-              ),
-            ]),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("スキップ")),
-              ElevatedButton(
-                onPressed: () => step < pages.length - 1
-                    ? setStep(() => step++)
-                    : {Navigator.pop(ctx), _promptApiKey()},
-                child: Text(step == pages.length - 1 ? "完了" : "次へ"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+  // --- スポットライトチュートリアル ---
+  void _startTutorial() {
+    setState(() => _tutorialStep = 0);
   }
+
+  void _endTutorial() {
+    setState(() => _tutorialStep = -1);
+  }
+
+  // チュートリアル各ステップの定義
+  List<Map<String, dynamic>> get _tutorialSteps => [
+    {
+      "key": null,
+      "title": "ようこそ！${chars[modeIndex]['i']}",
+      "msg": "AIレシピ・レシート読み込みを使うにはGemini APIキーが必要じゃ。\n一緒に設定しよう！",
+      "arrowDir": "none",
+    },
+    {
+      "key": _keySettings,
+      "title": "①設定を開く",
+      "msg": "右上の⚙️ボタンを押してくれ！",
+      "arrowDir": "top",
+    },
+    {
+      "key": null,
+      "title": "②APIキー取得ページへ",
+      "msg": "設定の中の「APIキーを取得」を押してGoogle AI Studioを開いてくれ。\nサインイン後「APIキーを作成」を押すとキーが発行されるぞ。",
+      "arrowDir": "none",
+    },
+    {
+      "key": null,
+      "title": "③APIキーを貼り付ける",
+      "msg": "発行されたAPIキー（AIza...から始まる文字列）をコピーして、「APIキーを保存」に貼り付けてくれ！",
+      "arrowDir": "none",
+    },
+    {
+      "key": null,
+      "title": "完了！🎉",
+      "msg": "これでAIレシピとレシート読み込みが使えるようになるぞ。\n早速試してみてくれ！",
+      "arrowDir": "none",
+    },
+  ];
 
   // --- 計量・消費ロジック ---
   void _consumeItem(int index) {
@@ -231,37 +239,49 @@ class _ReizokoAppState extends State<ReizokoApp> {
             onPressed: () => setState(() { _isListView = !_isListView; _save(); }),
           ),
           IconButton(
+            key: _keySettings,
             icon: const Icon(Icons.settings, color: Colors.amber),
-            onPressed: _showSettings,
+            onPressed: () {
+              if (_isTutorialActive && _tutorialStep == 1) {
+                setState(() => _tutorialStep = 2);
+                Future.delayed(const Duration(milliseconds: 200), _showSettings);
+              } else {
+                _showSettings();
+              }
+            },
           ),
         ],
       ),
-      body: Column(children: [
-        // リトライバナー（解析中・待機中のみ全タブで表示）
-        if (_retryBannerMsg.isNotEmpty)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            width: double.infinity,
-            color: Colors.orange.shade800,
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            child: Row(children: [
-              const SizedBox(
-                width: 14, height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: Text(
-                _retryBannerMsg,
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-              )),
-            ]),
-          ),
-        Expanded(child: [
-          _buildListTab(inventory, true, tc),
-          _buildRegistration(tc),
-          _buildListTab(shoppingList, false, tc),
-          _buildAiTab(tc),
-        ][_tabIdx]),
+      body: Stack(children: [
+        Column(children: [
+          // リトライバナー
+          if (_retryBannerMsg.isNotEmpty)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              width: double.infinity,
+              color: Colors.orange.shade800,
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              child: Row(children: [
+                const SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Text(
+                  _retryBannerMsg,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                )),
+              ]),
+            ),
+          Expanded(child: [
+            _buildListTab(inventory, true, tc),
+            _buildRegistration(tc),
+            _buildListTab(shoppingList, false, tc),
+            _buildAiTab(tc),
+          ][_tabIdx]),
+        ]),
+        // スポットライトオーバーレイ
+        if (_isTutorialActive) _buildSpotlightOverlay(context),
       ]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabIdx,
@@ -277,6 +297,183 @@ class _ReizokoAppState extends State<ReizokoApp> {
           BottomNavigationBarItem(icon: Icon(Icons.auto_awesome), label: "AIレシピ"),
         ],
       ),
+    );
+  }
+
+  // --- スポットライトオーバーレイ ---
+  Widget _buildSpotlightOverlay(BuildContext context) {
+    final step = _tutorialSteps[_tutorialStep];
+    final key = step["key"] as GlobalKey?;
+    final isLast = _tutorialStep == _tutorialSteps.length - 1;
+    final isFirst = _tutorialStep == 0;
+
+    // ハイライト対象の位置を取得
+    Rect? highlightRect;
+    if (key?.currentContext != null) {
+      final box = key!.currentContext!.findRenderObject() as RenderBox;
+      final pos = box.localToGlobal(Offset.zero);
+      highlightRect = Rect.fromLTWH(
+        pos.dx - 8, pos.dy - 8,
+        box.size.width + 16, box.size.height + 16,
+      );
+    }
+
+    return GestureDetector(
+      // ステップ1（設定ボタン押下）以外はタップで次へ
+      onTap: _tutorialStep != 1 ? () {
+        if (isLast) {
+          _endTutorial();
+          _promptApiKey();
+        } else {
+          setState(() => _tutorialStep++);
+        }
+      } : null,
+      child: Stack(children: [
+        // 暗いオーバーレイ（穴あきCustomPainter）
+        CustomPaint(
+          size: MediaQuery.of(context).size,
+          painter: _SpotlightPainter(highlightRect),
+        ),
+        // 吹き出しカード
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: highlightRect != null ? null : 120,
+          top: highlightRect != null
+              ? (highlightRect.bottom + 12 < MediaQuery.of(context).size.height - 200
+                  ? highlightRect.bottom + 12
+                  : highlightRect.top - 180)
+              : null,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.amber, width: 2),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20)],
+              ),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // ステップ数インジケーター
+                Row(children: [
+                  ...List.generate(_tutorialSteps.length, (i) => Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    width: i == _tutorialStep ? 20 : 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: i == _tutorialStep ? Colors.amber : Colors.white24,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  )),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: _endTutorial,
+                    child: const Text("スキップ", style: TextStyle(color: Colors.white38, fontSize: 12)),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                // キャラクターアイコンとタイトル
+                Row(children: [
+                  Text(chars[modeIndex]["i"], style: const TextStyle(fontSize: 28)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(
+                    step["title"] as String,
+                    style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16),
+                  )),
+                ]),
+                const SizedBox(height: 10),
+                Text(
+                  step["msg"] as String,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
+                ),
+                const SizedBox(height: 16),
+                // ステップ2（設定ボタン）以外はボタン表示
+                if (_tutorialStep == 2) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']),
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text("Google AI Studioを開く"),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => setState(() => _tutorialStep++),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.white24),
+                      child: const Text("取得できた → 次へ", style: TextStyle(color: Colors.white)),
+                    ),
+                  ),
+                ] else if (_tutorialStep == 3) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() => _tutorialStep++);
+                        _promptApiKey();
+                      },
+                      icon: const Icon(Icons.vpn_key),
+                      label: const Text("APIキーを貼り付ける"),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
+                    ),
+                  ),
+                ] else if (_tutorialStep == 1) ...[
+                  const SizedBox(
+                    width: double.infinity,
+                    child: Text(
+                      "↑ 右上の⚙️を押してください",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ] else ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (isLast) {
+                          _endTutorial();
+                        } else {
+                          setState(() => _tutorialStep++);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(0, 48),
+                      ),
+                      child: Text(isLast ? "はじめる！" : "次へ →"),
+                    ),
+                  ),
+                ],
+              ]),
+            ),
+          ),
+        ),
+        // ステップ1: 設定ボタンの光るリング
+        if (highlightRect != null)
+          Positioned(
+            left: highlightRect.left,
+            top: highlightRect.top,
+            child: IgnorePointer(
+              child: Container(
+                width: highlightRect.width,
+                height: highlightRect.height,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber, width: 3),
+                  boxShadow: [
+                    BoxShadow(color: Colors.amber.withOpacity(0.6), blurRadius: 15, spreadRadius: 3),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 
@@ -865,6 +1062,11 @@ limitは消費期限の目安日数（整数）。
         title: const Text("アプリ設定", style: TextStyle(color: Colors.white)),
         content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
+            leading: const Icon(Icons.help_outline, color: Colors.amber),
+            title: const Text("チュートリアルを見る", style: TextStyle(color: Colors.white)),
+            onTap: () { Navigator.pop(ctx); _startTutorial(); },
+          ),
+          ListTile(
             leading: const Icon(Icons.book, color: Colors.amber),
             title: const Text("保存したレシピ", style: TextStyle(color: Colors.white)),
             onTap: () { Navigator.pop(ctx); _showRecipeBook(); },
@@ -1076,4 +1278,27 @@ limitは消費期限の目安日数（整数）。
       dropdownColor: Colors.black87,
     ),
   );
+}
+
+// スポットライト用カスタムペインター（ハイライト箇所だけ穴を開ける）
+class _SpotlightPainter extends CustomPainter {
+  final Rect? highlightRect;
+  _SpotlightPainter(this.highlightRect);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.black.withOpacity(0.75);
+    if (highlightRect == null) {
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+    } else {
+      final path = Path()
+        ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+        ..addRRect(RRect.fromRectAndRadius(highlightRect!, const Radius.circular(8)))
+        ..fillType = PathFillType.evenOdd;
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SpotlightPainter old) => old.highlightRect != highlightRect;
 }
