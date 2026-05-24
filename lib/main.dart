@@ -295,6 +295,73 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
+  // --- 画像フルスクリーン表示 ---
+  void _showFullImage(String base64, String label) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) => GestureDetector(
+        onTap: () => Navigator.pop(ctx),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Stack(children: [
+            // 画像（ピンチズーム対応）
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Image.memory(
+                  Uri.parse('data:image/jpeg;base64,$base64').data!.contentAsBytes(),
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            // ラベル
+            Positioned(
+              top: 48, left: 16, right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  label,
+                  style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+            // 閉じるボタン
+            Positioned(
+              top: 44, right: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+            // タップで閉じるヒント
+            Positioned(
+              bottom: 40, left: 0, right: 0,
+              child: const Text(
+                "タップして閉じる  |  ピンチで拡大",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   // --- 画像付きAPIガイド ---
   Widget _buildApiImageGuide() {
     final guides = [
@@ -345,15 +412,32 @@ class _ReizokoAppState extends State<ReizokoApp> {
         ),
       ),
       const SizedBox(height: 6),
-      // 画像
-      ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.memory(
-          Uri.parse('data:image/jpeg;base64,${guide["img"]!}').data!.contentAsBytes(),
-          width: double.infinity,
-          height: 160,
-          fit: BoxFit.contain,
-        ),
+      // 画像（タップで拡大）
+      GestureDetector(
+        onTap: () => _showFullImage(guide["img"]!, guide["label"]!),
+        child: Stack(children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              Uri.parse('data:image/jpeg;base64,${guide["img"]!}').data!.contentAsBytes(),
+              width: double.infinity,
+              height: 160,
+              fit: BoxFit.contain,
+            ),
+          ),
+          // 拡大アイコン
+          Positioned(
+            right: 6, bottom: 6,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Icon(Icons.zoom_in, color: Colors.white, size: 18),
+            ),
+          ),
+        ]),
       ),
       const SizedBox(height: 8),
       // 前へ・次へボタン
