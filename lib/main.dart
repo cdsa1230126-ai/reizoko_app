@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:js' as js;
 import 'dart:html' as html;
 import 'food_data.dart';
+import 'api_images.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
@@ -55,8 +56,7 @@ class _ReizokoAppState extends State<ReizokoApp> {
 
   // スポットライトチュートリアル用
   int _tutorialStep = -1; // -1 = 非表示
-  final GlobalKey _keySettings = GlobalKey();
-  final GlobalKey _keyApiSave = GlobalKey();
+  int _guideImageIndex = 0; // 画像ガイドの現在ページ
 
   bool get _isTutorialActive => _tutorialStep >= 0;
 
@@ -82,34 +82,30 @@ class _ReizokoAppState extends State<ReizokoApp> {
   // チュートリアル各ステップの定義
   List<Map<String, dynamic>> get _tutorialSteps => [
     {
-      "key": null,
       "title": "ようこそ！${chars[modeIndex]['i']}",
       "msg": "AIレシピ・レシート読み込みを使うにはGemini APIキーが必要じゃ。\n一緒に設定しよう！",
-      "arrowDir": "none",
+      "highlight": null, // ハイライトなし
     },
     {
-      "key": _keySettings,
       "title": "①設定を開く",
       "msg": "右上の⚙️ボタンを押してくれ！",
-      "arrowDir": "top",
+      "highlight": "settings", // 設定ボタンを固定座標でハイライト
     },
     {
-      "key": null,
-      "title": "②APIキー取得ページへ",
-      "msg": "設定の中の「APIキーを取得」を押してGoogle AI Studioを開いてくれ。\nサインイン後「APIキーを作成」を押すとキーが発行されるぞ。",
-      "arrowDir": "none",
+      "title": "②Google AI Studioでキーを取得",
+      "msg": "下のボタンを押すと別タブでGoogle AI Studioが開くぞ。\n画面の手順を見ながら進めてくれ！",
+      "highlight": null,
+      "showGuide": true, // 画像ガイドを表示
     },
     {
-      "key": null,
       "title": "③APIキーを貼り付ける",
-      "msg": "発行されたAPIキー（AIza...から始まる文字列）をコピーして、「APIキーを保存」に貼り付けてくれ！",
-      "arrowDir": "none",
+      "msg": "コピーしたAPIキーを下のボタンから入力画面に貼り付けて「保存」を押してくれ！",
+      "highlight": null,
     },
     {
-      "key": null,
       "title": "完了！🎉",
       "msg": "これでAIレシピとレシート読み込みが使えるようになるぞ。\n早速試してみてくれ！",
-      "arrowDir": "none",
+      "highlight": null,
     },
   ];
 
@@ -239,7 +235,6 @@ class _ReizokoAppState extends State<ReizokoApp> {
             onPressed: () => setState(() { _isListView = !_isListView; _save(); }),
           ),
           IconButton(
-            key: _keySettings,
             icon: const Icon(Icons.settings, color: Colors.amber),
             onPressed: () {
               if (_isTutorialActive && _tutorialStep == 1) {
@@ -300,50 +295,125 @@ class _ReizokoAppState extends State<ReizokoApp> {
     );
   }
 
+  // --- 画像付きAPIガイド ---
+  Widget _buildApiImageGuide() {
+    final guides = [
+      {
+        "img": kApiStep1Base64,
+        "label": "① 「APIキーを作成」を押す",
+        "arrow": "右上のボタン →",
+      },
+      {
+        "img": kApiStep2Base64,
+        "label": "② キー名はそのままで「キーを作成」を押す",
+        "arrow": "右下のボタン →",
+      },
+      {
+        "img": kApiStep3Base64,
+        "label": "③ 「キーをコピー」を押してコピーする",
+        "arrow": "右下のボタン →",
+      },
+    ];
+    final guide = guides[_guideImageIndex];
+
+    return Column(children: [
+      // ページ番号
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        ...List.generate(guides.length, (i) => Container(
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          width: i == _guideImageIndex ? 16 : 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: i == _guideImageIndex ? Colors.amber : Colors.white24,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        )),
+      ]),
+      const SizedBox(height: 8),
+      // 説明テキスト
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.amber.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          guide["label"]!,
+          style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 13),
+          textAlign: TextAlign.center,
+        ),
+      ),
+      const SizedBox(height: 6),
+      // 画像
+      ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          Uri.parse('data:image/jpeg;base64,${guide["img"]!}').data!.contentAsBytes(),
+          width: double.infinity,
+          height: 160,
+          fit: BoxFit.contain,
+        ),
+      ),
+      const SizedBox(height: 8),
+      // 前へ・次へボタン
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        TextButton(
+          onPressed: _guideImageIndex > 0
+              ? () => setState(() => _guideImageIndex--)
+              : null,
+          child: const Text("← 前へ", style: TextStyle(color: Colors.white54)),
+        ),
+        Text(
+          "${_guideImageIndex + 1} / ${guides.length}",
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+        TextButton(
+          onPressed: _guideImageIndex < guides.length - 1
+              ? () => setState(() => _guideImageIndex++)
+              : null,
+          child: const Text("次へ →", style: TextStyle(color: Colors.amber)),
+        ),
+      ]),
+    ]);
+  }
+
   // --- スポットライトオーバーレイ ---
   Widget _buildSpotlightOverlay(BuildContext context) {
     final step = _tutorialSteps[_tutorialStep];
-    final key = step["key"] as GlobalKey?;
     final isLast = _tutorialStep == _tutorialSteps.length - 1;
-    final isFirst = _tutorialStep == 0;
+    final screenW = MediaQuery.of(context).size.width;
+    final screenH = MediaQuery.of(context).size.height;
+    final topPadding = MediaQuery.of(context).padding.top;
 
-    // ハイライト対象の位置を取得
+    // 設定ボタンの固定座標（AppBar右上・アイコンサイズ48px想定）
     Rect? highlightRect;
-    if (key?.currentContext != null) {
-      final box = key!.currentContext!.findRenderObject() as RenderBox;
-      final pos = box.localToGlobal(Offset.zero);
+    if (step["highlight"] == "settings") {
+      final appBarH = kToolbarHeight + topPadding;
       highlightRect = Rect.fromLTWH(
-        pos.dx - 8, pos.dy - 8,
-        box.size.width + 16, box.size.height + 16,
+        screenW - 56, topPadding + (kToolbarHeight - 48) / 2,
+        48, 48,
       );
     }
 
     return GestureDetector(
-      // ステップ1（設定ボタン押下）以外はタップで次へ
-      onTap: _tutorialStep != 1 ? () {
-        if (isLast) {
-          _endTutorial();
-          _promptApiKey();
-        } else {
-          setState(() => _tutorialStep++);
-        }
+      onTap: (_tutorialStep != 1) ? () {
+        if (isLast) _endTutorial();
+        else setState(() => _tutorialStep++);
       } : null,
       child: Stack(children: [
         // 暗いオーバーレイ（穴あきCustomPainter）
         CustomPaint(
-          size: MediaQuery.of(context).size,
+          size: Size(screenW, screenH),
           painter: _SpotlightPainter(highlightRect),
         ),
-        // 吹き出しカード
+
+        // 吹き出しカード（画面中央下寄り固定、ハイライトがある場合はその下）
         Positioned(
           left: 16,
           right: 16,
-          bottom: highlightRect != null ? null : 120,
-          top: highlightRect != null
-              ? (highlightRect.bottom + 12 < MediaQuery.of(context).size.height - 200
-                  ? highlightRect.bottom + 12
-                  : highlightRect.top - 180)
-              : null,
+          bottom: highlightRect != null ? null : 80,
+          top: highlightRect != null ? highlightRect.bottom + 16 : null,
           child: Material(
             color: Colors.transparent,
             child: Container(
@@ -352,10 +422,10 @@ class _ReizokoAppState extends State<ReizokoApp> {
                 color: Colors.grey[900],
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: Colors.amber, width: 2),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20)],
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.6), blurRadius: 20)],
               ),
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // ステップ数インジケーター
+                // ステップインジケーター + スキップ
                 Row(children: [
                   ...List.generate(_tutorialSteps.length, (i) => Container(
                     margin: const EdgeInsets.only(right: 4),
@@ -373,7 +443,8 @@ class _ReizokoAppState extends State<ReizokoApp> {
                   ),
                 ]),
                 const SizedBox(height: 12),
-                // キャラクターアイコンとタイトル
+
+                // キャラクター + タイトル
                 Row(children: [
                   Text(chars[modeIndex]["i"], style: const TextStyle(fontSize: 28)),
                   const SizedBox(width: 10),
@@ -383,70 +454,106 @@ class _ReizokoAppState extends State<ReizokoApp> {
                   )),
                 ]),
                 const SizedBox(height: 10),
+
+                // メッセージ
                 Text(
                   step["msg"] as String,
-                  style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
+                  style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.6),
                 ),
                 const SizedBox(height: 16),
-                // ステップ2（設定ボタン）以外はボタン表示
-                if (_tutorialStep == 2) ...[
+
+                // ステップ別ボタン
+                if (_tutorialStep == 1) ...[
+                  // 設定ボタンをハイライト中：テキストのみ（ユーザーに押させる）
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.withOpacity(0.5)),
+                    ),
+                    child: const Text(
+                      "⬆️ 右上の ⚙️ を押してください",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+                ] else if (_tutorialStep == 2) ...[
+                  // 画像付き手順ガイド
+                  _buildApiImageGuide(),
+                  const SizedBox(height: 8),
+                  // Google AI Studio を開くボタン
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']),
+                      onPressed: () {
+                        js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']);
+                      },
                       icon: const Icon(Icons.open_in_new),
-                      label: const Text("Google AI Studioを開く"),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
+                      label: const Text("Google AI Studioを開く（別タブ）"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // 戻ってきた後に押すボタン
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () => setState(() => _tutorialStep++),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.white24),
-                      child: const Text("取得できた → 次へ", style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white12,
+                        minimumSize: const Size(0, 48),
+                      ),
+                      child: const Text(
+                        "キーをコピーできた → 次へ ✓",
+                        style: TextStyle(color: Colors.white),
+                      ),
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    "※ 別タブが開きます。コピーしたらこの画面に戻ってきてください",
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                    textAlign: TextAlign.center,
+                  ),
                 ] else if (_tutorialStep == 3) ...[
+                  // APIキー貼り付けボタン
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: () {
                         setState(() => _tutorialStep++);
-                        _promptApiKey();
+                        Future.delayed(const Duration(milliseconds: 100), _promptApiKey);
                       },
                       icon: const Icon(Icons.vpn_key),
                       label: const Text("APIキーを貼り付ける"),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black),
-                    ),
-                  ),
-                ] else if (_tutorialStep == 1) ...[
-                  const SizedBox(
-                    width: double.infinity,
-                    child: Text(
-                      "↑ 右上の⚙️を押してください",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size(0, 48),
+                      ),
                     ),
                   ),
                 ] else ...[
+                  // 通常の次へ / はじめるボタン
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        if (isLast) {
-                          _endTutorial();
-                        } else {
-                          setState(() => _tutorialStep++);
-                        }
+                        if (isLast) _endTutorial();
+                        else setState(() => _tutorialStep++);
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.amber,
                         foregroundColor: Colors.black,
                         minimumSize: const Size(0, 48),
                       ),
-                      child: Text(isLast ? "はじめる！" : "次へ →"),
+                      child: Text(isLast ? "🎉 はじめる！" : "次へ →"),
                     ),
                   ),
                 ],
@@ -454,8 +561,24 @@ class _ReizokoAppState extends State<ReizokoApp> {
             ),
           ),
         ),
-        // ステップ1: 設定ボタンの光るリング
-        if (highlightRect != null)
+
+        // ハイライトの光るリング（設定ボタン用）
+        if (highlightRect != null) ...[
+          // タップ可能な透明エリア（設定ボタンの位置に重ねる）
+          Positioned(
+            left: highlightRect.left,
+            top: highlightRect.top,
+            width: highlightRect.width,
+            height: highlightRect.height,
+            child: GestureDetector(
+              onTap: () {
+                setState(() => _tutorialStep = 2);
+                Future.delayed(const Duration(milliseconds: 200), _showSettings);
+              },
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+          // 光るリング（IgnorePointerで当たり判定なし）
           Positioned(
             left: highlightRect.left,
             top: highlightRect.top,
@@ -467,20 +590,18 @@ class _ReizokoAppState extends State<ReizokoApp> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.amber, width: 3),
                   boxShadow: [
-                    BoxShadow(color: Colors.amber.withOpacity(0.6), blurRadius: 15, spreadRadius: 3),
+                    BoxShadow(color: Colors.amber.withOpacity(0.7), blurRadius: 18, spreadRadius: 4),
                   ],
                 ),
               ),
             ),
           ),
+        ],
       ]),
     );
   }
 
   Widget _buildListTab(List<dynamic> list, bool isInv, Color tc) {
-    if (list.isEmpty) {
-      return Center(child: Text(isInv ? "中身は空じゃ。" : "買うものはないぞ。", style: TextStyle(color: tc)));
-    }
     if (!_isListView && isInv) {
       // グリッド表示（在庫タブのみ）
       return GridView.builder(
