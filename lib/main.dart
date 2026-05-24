@@ -238,8 +238,8 @@ class _ReizokoAppState extends State<ReizokoApp> {
             icon: const Icon(Icons.settings, color: Colors.amber),
             onPressed: () {
               if (_isTutorialActive && _tutorialStep == 1) {
+                // チュートリアル中は設定画面を開かずステップを進めるだけ
                 setState(() => _tutorialStep = 2);
-                Future.delayed(const Duration(milliseconds: 200), _showSettings);
               } else {
                 _showSettings();
               }
@@ -470,13 +470,14 @@ class _ReizokoAppState extends State<ReizokoApp> {
     final screenH = MediaQuery.of(context).size.height;
     final topPadding = MediaQuery.of(context).padding.top;
 
-    // 設定ボタンの固定座標（AppBar右上・アイコンサイズ48px想定）
+    // 設定ボタンの固定座標
+    // AppBar右端から: グリッドボタン(48px) + 設定ボタン(48px) で右から2番目
     Rect? highlightRect;
     if (step["highlight"] == "settings") {
-      final appBarH = kToolbarHeight + topPadding;
       highlightRect = Rect.fromLTWH(
-        screenW - 56, topPadding + (kToolbarHeight - 48) / 2,
-        48, 48,
+        screenW - 104, // 右から2番目（48px×2）
+        topPadding + (kToolbarHeight - 44) / 2,
+        44, 44,
       );
     }
 
@@ -659,8 +660,8 @@ class _ReizokoAppState extends State<ReizokoApp> {
             height: highlightRect.height,
             child: GestureDetector(
               onTap: () {
+                // チュートリアル中は設定画面を開かずステップだけ進める
                 setState(() => _tutorialStep = 2);
-                Future.delayed(const Duration(milliseconds: 200), _showSettings);
               },
               child: Container(color: Colors.transparent),
             ),
