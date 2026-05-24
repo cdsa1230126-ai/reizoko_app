@@ -572,10 +572,13 @@ class _ReizokoAppState extends State<ReizokoApp> {
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: () {
-                        js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']);
+                        // target="_blank" で外部ブラウザ（Safari）で開く
+                        js.context.callMethod('eval', [
+                          "window.open('https://aistudio.google.com/app/apikey', '_blank', 'noopener,noreferrer');"
+                        ]);
                       },
                       icon: const Icon(Icons.open_in_new),
-                      label: const Text("Google AI Studioを開く（別タブ）"),
+                      label: const Text("Google AI Studioを開く（Safariで開きます）"),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.amber,
                         foregroundColor: Colors.black,
@@ -1279,7 +1282,9 @@ limitは消費期限の目安日数（整数）。
           ListTile(
             leading: const Icon(Icons.open_in_new, color: Colors.amber),
             title: const Text("APIキーを取得", style: TextStyle(color: Colors.white)),
-            onTap: () => js.context.callMethod('open', ['https://aistudio.google.com/app/apikey']),
+            onTap: () => js.context.callMethod('eval', [
+              "window.open('https://aistudio.google.com/app/apikey', '_blank', 'noopener,noreferrer');"
+            ]),
           ),
           ListTile(
             leading: const Icon(Icons.vpn_key, color: Colors.amber),
