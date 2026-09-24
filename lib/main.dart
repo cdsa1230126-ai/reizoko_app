@@ -695,127 +695,230 @@ class _ReizokoAppState extends State<ReizokoApp> {
   }
 
   Widget _buildListTab(List<dynamic> list, bool isInv, Color tc) {
+    if (list.isEmpty) {
+      return Center(child: Text(
+        isInv ? "中身は空じゃ。" : "買うものはないぞ。",
+        style: TextStyle(color: tc),
+      ));
+    }
     if (!_isListView && isInv) {
-      // グリッド表示（在庫タブのみ）
       return GridView.builder(
         padding: const EdgeInsets.all(10),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
-          childAspectRatio: 0.75,
+          childAspectRatio: 0.72,
           crossAxisSpacing: 8,
           mainAxisSpacing: 8,
         ),
         itemCount: list.length,
-        itemBuilder: (ctx, i) => _itemDismissible(list[i], i, isInv),
+        itemBuilder: (ctx, i) => _itemCard(list[i], i),
       );
     }
     return ListView.builder(
       padding: const EdgeInsets.all(10),
       itemCount: list.length,
-      itemBuilder: (ctx, i) => _itemDismissible(list[i], i, isInv),
+      itemBuilder: (ctx, i) => _itemTile(list[i], i, isInv),
     );
   }
 
-  // --- スワイプ機能共通化 ---
-  Widget _itemDismissible(dynamic item, int i, bool isInv) {
-    return Dismissible(
-      key: UniqueKey(),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        color: isInv ? Colors.orange.withOpacity(0.6) : Colors.green.withOpacity(0.6),
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        child: Icon(isInv ? Icons.restaurant : Icons.check, color: Colors.white),
-      ),
-      confirmDismiss: (dir) async {
-        // FIX: スワイプ後に自前で処理するため confirm で false を返し、手動で操作
-        if (isInv) {
-          _consumeItem(i);
-        } else {
-          _buyItem(i);
-        }
-        return false; // Dismissible 自身にはリストを変更させない（_consumeItem/_buyItem 内の setState で管理）
-      },
-      child: _isListView ? _itemTile(item, i, isInv) : _itemCard(item, i, isInv),
-    );
-  }
-
+  // --- 在庫・買い物 リストタイル ---
   Widget _itemTile(dynamic item, int i, bool isInv) {
-    Color cardColor = isInv ? Colors.black45 : Colors.transparent;
+    Color cardColor = isInv ? Colors.black45 : Colors.black26;
     if (isInv && item["expiry"] != null) {
       final diff = DateTime.parse(item["expiry"]).difference(DateTime.now()).inDays;
       if (diff < 0) cardColor = Colors.red.withOpacity(0.4);
       else if (diff <= 2) cardColor = Colors.orange.withOpacity(0.4);
     }
-
     return Card(
       color: cardColor,
-      elevation: isInv ? 1 : 0,
-      child: ListTile(
-        leading: Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 28)),
-        title: Row(children: [
-          Text(item["name"], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          if (item["isFav"] == true) const Icon(Icons.star, color: Colors.amber, size: 16),
-        ]),
-        subtitle: Text(
-          "${item["count"]}${item["unit"]} / ${item["loc"] ?? '冷蔵'}\n期限: ${item["expiry"]?.split('T')[0] ?? ''}",
-          style: const TextStyle(color: Colors.white70, fontSize: 11),
-        ),
-        trailing: isInv
-            ? IconButton(
-                icon: const Icon(Icons.remove_circle_outline, color: Colors.white70),
-                onPressed: () => _consumeItem(i),
-              )
-            : IconButton(
-                icon: const Icon(Icons.check_circle, color: Color(0xFF7FFFD4)),
-                onPressed: () => _buyItem(i),
+      elevation: 1,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(children: [
+          Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 28)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Flexible(child: Text(item["name"],
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                overflow: TextOverflow.ellipsis)),
+              if (item["isFav"] == true)
+                const Padding(padding: EdgeInsets.only(left: 4),
+                  child: Icon(Icons.star, color: Colors.amber, size: 14)),
+            ]),
+            Text(
+              isInv
+                ? "${item["count"]}${item["unit"]} / ${item["loc"] ?? "冷蔵"} / 期限: ${item["expiry"]?.split("T")[0] ?? ""}"
+                : "${item["unit"]} / ${item["loc"] ?? "冷蔵"}",
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
+          ])),
+          const SizedBox(width: 4),
+          if (isInv) ...[
+            _iconBtn(Icons.remove_circle_outline, Colors.white60, () => _consumeItem(i)),
+            _iconBtn(Icons.shopping_cart_outlined, Colors.amber, () => _moveToShoppingManual(i)),
+            _iconBtn(Icons.delete_outline, Colors.red.shade300, () => _deleteInventory(i)),
+          ] else ...[
+            GestureDetector(
+              onTap: () => _showBuyDialog(i),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7FFFD4),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text("在庫へ",
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
               ),
+            ),
+            const SizedBox(width: 6),
+            _iconBtn(Icons.delete_outline, Colors.red.shade300, () => _deleteShopping(i)),
+          ],
+        ]),
       ),
     );
   }
 
-  Widget _itemCard(dynamic item, int i, bool isInv) {
-    Color cardColor = isInv ? Colors.black45 : Colors.transparent;
-    if (isInv && item["expiry"] != null) {
+  // --- グリッドカード（在庫のみ） ---
+  Widget _itemCard(dynamic item, int i) {
+    Color cardColor = Colors.black45;
+    if (item["expiry"] != null) {
       final diff = DateTime.parse(item["expiry"]).difference(DateTime.now()).inDays;
       if (diff < 0) cardColor = Colors.red.withOpacity(0.4);
       else if (diff <= 2) cardColor = Colors.orange.withOpacity(0.4);
     }
-
     return Card(
       color: cardColor,
-      elevation: isInv ? 1 : 0,
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        if (item["isFav"] == true) const Icon(Icons.star, color: Colors.amber, size: 14),
-        Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 40)),
-        Text(item["name"], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        Text("${item["count"]}${item["unit"]}", style: const TextStyle(color: Color(0xFF7FFFD4))),
-        Text(item["loc"] ?? "冷蔵", style: const TextStyle(color: Colors.white38, fontSize: 10)),
-        const SizedBox(height: 5),
-        isInv
-            ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                IconButton(
-                  icon: const Icon(Icons.remove_circle_outline, color: Colors.white60),
-                  onPressed: () => _consumeItem(i),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline, color: Colors.white60),
-                  // FIX: setState の外で _save() を呼ぶ
-                  onPressed: () {
-                    setState(() { item["count"] = (item["count"] as num).toDouble() + 1.0; });
-                    _save();
-                  },
-                ),
-              ])
-            : ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF7FFFD4),
-                  foregroundColor: Colors.black,
-                ),
-                onPressed: () => _buyItem(i),
-                child: const Text("購入"),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          if (item["isFav"] == true) const Icon(Icons.star, color: Colors.amber, size: 12),
+          Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 32)),
+          Text(item["name"],
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+            textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text("${item["count"]}${item["unit"]}",
+            style: const TextStyle(color: Color(0xFF7FFFD4), fontSize: 11)),
+          const SizedBox(height: 4),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            _iconBtn(Icons.remove_circle_outline, Colors.white60, () => _consumeItem(i), size: 20),
+            _iconBtn(Icons.shopping_cart_outlined, Colors.amber, () => _moveToShoppingManual(i), size: 20),
+            _iconBtn(Icons.delete_outline, Colors.red.shade300, () => _deleteInventory(i), size: 20),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _iconBtn(IconData icon, Color color, VoidCallback onTap, {double size = 22}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Icon(icon, color: color, size: size),
+      ),
+    );
+  }
+
+  void _moveToShoppingManual(int i) {
+    final item = inventory[i];
+    setState(() {
+      shoppingList.add({...item, "count": 1.0});
+      inventory.removeAt(i);
+    });
+    _speak("${_escapeSpeech(item["name"])}を買い物リストに移したぞ。");
+    _save();
+  }
+
+  void _deleteInventory(int i) {
+    final name = inventory[i]["name"];
+    setState(() => inventory.removeAt(i));
+    _speak("${_escapeSpeech(name)}を削除したぞ。");
+    _save();
+  }
+
+  void _deleteShopping(int i) {
+    setState(() => shoppingList.removeAt(i));
+    _save();
+  }
+
+  void _showBuyDialog(int index) {
+    final item = shoppingList[index];
+    final TextEditingController countCtrl = TextEditingController(text: "1");
+    DateTime expiry = DateTime.now().add(const Duration(days: 3));
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlg) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: Row(children: [
+            Text(item["icon"] ?? "📦", style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(item["name"],
+              style: const TextStyle(color: Colors.white, fontSize: 16))),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: countCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: "個数 (${item["unit"] ?? "個"})",
+                labelStyle: const TextStyle(color: Colors.white54),
+                filled: true, fillColor: Colors.white10,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none),
               ),
-      ]),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              const Icon(Icons.calendar_today, color: Colors.white54, size: 16),
+              const SizedBox(width: 8),
+              Text("期限: ${expiry.year}/${expiry.month}/${expiry.day}",
+                style: const TextStyle(color: Colors.white70)),
+              const Spacer(),
+              TextButton(
+                onPressed: () async {
+                  final p = await showDatePicker(
+                    context: context, initialDate: expiry,
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (p != null) setDlg(() => expiry = p);
+                },
+                child: const Text("変更", style: TextStyle(color: Colors.amber)),
+              ),
+            ]),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("キャンセル", style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final count = double.tryParse(countCtrl.text) ?? 1.0;
+                setState(() {
+                  inventory.add({...item, "count": count, "expiry": expiry.toIso8601String()});
+                  shoppingList.removeAt(index);
+                  _sortInventory();
+                });
+                _speak("${_escapeSpeech(item["name"])}を在庫に追加したぞ。");
+                _save();
+                Navigator.pop(ctx);
+              },
+              icon: const Icon(Icons.kitchen),
+              label: const Text("在庫へ追加"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF7FFFD4),
+                foregroundColor: Colors.black,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -828,7 +931,6 @@ class _ReizokoAppState extends State<ReizokoApp> {
       shoppingList.removeAt(index);
       _sortInventory();
     });
-    _speak("食材を補充した${chars[modeIndex]['s']}。");
     _save();
   }
 
