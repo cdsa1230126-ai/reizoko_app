@@ -45,6 +45,11 @@ class _ReizokoAppState extends State<ReizokoApp> {
   bool _isReceiptLoading = false;
   List<Map<String, dynamic>> _receiptItems = [];
 
+  // 食材検索用
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = "";
+  List<Map<String, dynamic>> _searchResults = [];
+
   // リトライバナー用
   String _retryBannerMsg = ""; // 空文字のときはバナー非表示
 
@@ -833,6 +838,124 @@ class _ReizokoAppState extends State<ReizokoApp> {
       padding: const EdgeInsets.all(20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
+        // ── 食材検索欄 ──
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.black38,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // 検索フィールド
+            TextField(
+              controller: _searchController,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+              decoration: InputDecoration(
+                hintText: "食材を検索... (例: 鶏、トマト、豆腐)",
+                hintStyle: const TextStyle(color: Colors.white38),
+                prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.white38),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() { _searchQuery = ""; _searchResults = []; });
+                        },
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
+              onChanged: (val) {
+                setState(() {
+                  _searchQuery = val;
+                  if (val.isEmpty) {
+                    _searchResults = [];
+                  } else {
+                    // 全カテゴリから検索
+                    _searchResults = [];
+                    for (final cat in foodMaster.entries) {
+                      for (final item in cat.value) {
+                        if (item["name"].contains(val)) {
+                          _searchResults.add({...item, "cat": cat.key});
+                        }
+                      }
+                    }
+                  }
+                });
+              },
+            ),
+            // 検索結果
+            if (_searchResults.isNotEmpty) ...[
+              const Divider(color: Colors.white12, height: 1),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
+                  itemCount: _searchResults.length,
+                  itemBuilder: (ctx, i) {
+                    final item = _searchResults[i];
+                    return ListTile(
+                      dense: true,
+                      leading: Text(item["icon"], style: const TextStyle(fontSize: 22)),
+                      title: Text(item["name"],
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Text(item["cat"],
+                        style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                        // 在庫へ追加
+                        GestureDetector(
+                          onTap: () {
+                            _addFromSearch(item, true);
+                            _searchController.clear();
+                            setState(() { _searchQuery = ""; _searchResults = []; });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF7FFFD4),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text("在庫へ",
+                              style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        // 買い物リストへ追加
+                        GestureDetector(
+                          onTap: () {
+                            _addFromSearch(item, false);
+                            _searchController.clear();
+                            setState(() { _searchQuery = ""; _searchResults = []; });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text("買い物へ",
+                              style: TextStyle(color: Colors.white, fontSize: 12)),
+                          ),
+                        ),
+                      ]),
+                    );
+                  },
+                ),
+              ),
+            ] else if (_searchQuery.isNotEmpty && _searchResults.isEmpty) ...[
+              const Divider(color: Colors.white12, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text("「$_searchQuery」は見つからなかったぞ。下から手動で登録してくれ。",
+                  style: const TextStyle(color: Colors.white38, fontSize: 13)),
+              ),
+            ],
+          ]),
+        ),
+
         // ── レシート読み込みセクション ──
         Container(
           padding: const EdgeInsets.all(15),
@@ -1030,6 +1153,27 @@ class _ReizokoAppState extends State<ReizokoApp> {
       _sortInventory();
     });
     _speak("${_escapeSpeech(_name)}を追加したぞ。");
+    _save();
+  }
+
+  // 検索結果から直接登録
+  void _addFromSearch(Map<String, dynamic> item, bool toInv) {
+    final limit = (item["limit"] as num).toInt();
+    final data = {
+      "name": item["name"],
+      "icon": item["icon"],
+      "count": 1.0,
+      "unit": "個",
+      "expiry": DateTime.now().add(Duration(days: limit)).toIso8601String(),
+      "isFav": false,
+      "loc": "冷蔵",
+    };
+    setState(() {
+      if (toInv) inventory.add(data);
+      else shoppingList.add(data);
+      _sortInventory();
+    });
+    _speak("${_escapeSpeech(item["name"])}を追加したぞ。");
     _save();
   }
 
